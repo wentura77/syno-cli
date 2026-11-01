@@ -202,6 +202,7 @@ def render_downloads(tasks: list[dict[str, Any]], stats: dict[str, Any] | None =
     table = Table(title="Задачи Download Station")
     table.add_column("ID", style="bold cyan")
     table.add_column("Имя файла / Задачи")
+    table.add_column("Директория", style="dim")
     table.add_column("Статус")
     table.add_column("Размер", justify="right")
     table.add_column("Прогресс", justify="right")
@@ -212,7 +213,12 @@ def render_downloads(tasks: list[dict[str, Any]], stats: dict[str, Any] | None =
         title = t.get("title", "—")
         status = t.get("status", "unknown")
         size = int(t.get("size", 0))
-        transfer = t.get("additional", {}).get("transfer", {})
+        
+        additional = t.get("additional", {})
+        detail = additional.get("detail", {})
+        destination = detail.get("destination", "—")
+        
+        transfer = additional.get("transfer", {})
         downloaded = int(transfer.get("size_downloaded", 0))
         speed_dl = int(transfer.get("speed_download", 0))
         pct = f"{(downloaded / size * 100):.1f}%" if size > 0 else "0.0%"
@@ -220,6 +226,7 @@ def render_downloads(tasks: list[dict[str, Any]], stats: dict[str, Any] | None =
         table.add_row(
             tid,
             title,
+            destination,
             colorize_status(status),
             format_bytes(size),
             pct,
