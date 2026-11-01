@@ -2,7 +2,7 @@
 name = "syno-cli"
 version = "0.1.0"
 description = "Комплексная CLI-утилита для управления Synology NAS через официальный DSM Web API"
-authors = ["Admin <admin@example.local>"]
+authors = ["Vitalii Kovrigin <wentura77@gmail.com>"]
 readme = "README.md"
 packages = [{include = "syno_cli"}]
 
@@ -14,14 +14,38 @@ rich = "^13.7.0"
 pydantic = "^2.6.0"
 pydantic-settings = "^2.2.0"
 python-dotenv = "^1.0.1"
+platformdirs = "^4.14.2"
+cryptography = "^50.0.2"
+keyring = "^25.7.0"
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^8.0.0"
-pytest-asyncio = "^0.23.0"
-debugpy = "^1.8.0"
+pytest = "^8.2.0"
+pytest-asyncio = "^0.23.6"
+mypy = "^1.10.0"
+darglint = "^1.8.1"
+interrogate = "^1.5.0"
+
 
 [tool.poetry.scripts]
 syno = "syno_cli.commands.main:run"
+
+[tool.darglint]
+docstring_style = "google"
+strictness = "full"
+ignore_raise = ["DsmApiError", "DsmAuthError", "DsmTaskNotFoundError"]
+
+[tool.interrogate]
+ignore-init-method = true
+ignore-init-module = true
+ignore-magic = true
+ignore-semiprivate = true
+ignore-private = true
+ignore-property-decorators = true
+ignore-nested-functions = true
+ignore-nested-classes = true
+fail-under = 90
+exclude = ["tests", "dist", "build"]
+color = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

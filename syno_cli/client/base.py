@@ -5,18 +5,19 @@ from pathlib import Path
 from typing import Any, Optional
 import httpx
 
-from syno_cli.config import SynoSettings, settings as default_settings
+from syno_cli.config import DEFAULT_SESSION_FILE, SynoSettings, settings as default_settings
 from syno_cli.exceptions import DsmApiError, DsmAuthError
+from syno_cli.session_storage import BaseSessionStorage, get_session_storage
 
 
 class BaseSynoClient:
-    """
-    Базовый клиент Synology DSM Web API.
+    """Базовый клиент Synology DSM Web API с шифрованием сессии.
 
     Отвечает за:
     - обнаружение доступных эндпоинтов через `SYNO.API.Info`;
     - аутентификацию через `SYNO.API.Auth` с поддержкой 2FA (OTP);
-    - кэширование идентификатора сессии (`sid`) и карты API на диске;
+    - защищенное кэширование токена сессии (`sid`) и карты API в `user_cache_dir`
+      с аппаратным шифрованием Fernet (`machine-id`) или в системном `keyring`;
     - автоматический перелогин при истечении сессии (коды 105, 106, 107, 119).
     """
 
@@ -24,10 +25,31 @@ class BaseSynoClient:
         self,
         config: Optional[SynoSettings] = None,
         transport: Optional[httpx.AsyncBaseTransport] = None,
+        session_backend: Optional[str] = None,
     ) -> None:
+        """Инициализирует базовый клиент Synology и загружает зашифрованную сессию.
+
+        Args:
+            config: Объект настроек подключения.
+            transport: Кастомный транспорт (для unit-тестов с `httpx.MockTransport`).
+            session_backend: Принудительный выбор бэкенда (`'file'`, `'keyring'`, `'auto'`).
+        """
         self.config = config or default_settings
         self.sid: Optional[str] = None
         self.api_map: dict[str, dict[str, Any]] = {}
+
+        # Если в тестах передан кастомный путь session_file, используем файловый бэкенд
+        custom_file_override = self.config.session_file != DEFAULT_SESSION_FILE
+        effective_backend = (
+            session_backend
+            if session_backend is not None
+            else ("file" if custom_file_override else self.config.session_backend)
+        )
+        self.storage: BaseSessionStorage = get_session_storage(
+            backend=effective_backend,
+            file_path=Path(self.config.session_file),
+        )
+
         self.client = httpx.AsyncClient(
             base_url=self.config.base_url,
             verify=False,
@@ -37,37 +59,42 @@ class BaseSynoClient:
         self._load_session()
 
     def _load_session(self) -> None:
-        """Загружает сохраненный токен `sid` и карту API из локального кэш-файла."""
-        path: Path = self.config.session_file
-        if path.exists():
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
+        """Загружает и расшифровывает сохраненный токен `sid` и карту API из хранилища."""
+        try:
+            data = self.storage.load()
+            if data:
                 self.sid = data.get("sid")
-                self.api_map = data.get("api_map", {})
-            except Exception:
-                self.sid = None
+                api_map_raw = data.get("api_map", {})
+                self.api_map = api_map_raw if isinstance(api_map_raw, dict) else {}
+        except Exception:
+            self.sid = None
+            self.api_map = {}
 
     def _save_session(self) -> None:
-        """Сохраняет текущий токен `sid` и карту API в локальный кэш-файл."""
+        """Шифрует и сохраняет текущий токен `sid` и карту API в хранилище."""
         try:
-            payload = {"sid": self.sid, "api_map": self.api_map}
-            self.config.session_file.write_text(
-                json.dumps(payload, indent=2), encoding="utf-8"
-            )
+            payload: dict[str, Any] = {"sid": self.sid, "api_map": self.api_map}
+            self.storage.save(payload)
         except Exception:
             pass
 
     def _clear_session(self) -> None:
-        """Очищает токен сессии в памяти и удаляет кэш-файл."""
+        """Очищает токен сессии в памяти и удаляет зашифрованный кэш."""
         self.sid = None
-        if self.config.session_file.exists():
-            try:
-                self.config.session_file.unlink()
-            except Exception:
-                pass
+        try:
+            self.storage.clear()
+        except Exception:
+            pass
 
     async def discover_apis(self) -> dict[str, dict[str, Any]]:
-        """Запрашивает карту поддерживаемых API и их CGI-путей через `SYNO.API.Info`."""
+        """Запрашивает карту поддерживаемых API и их CGI-путей через `SYNO.API.Info`.
+
+        Returns:
+            dict[str, dict[str, Any]]: Словарь описания API интерфейсов DSM.
+
+        Raises:
+            DsmApiError: При ошибке выполнения запроса к DSM.
+        """
         resp = await self.client.get(
             "/webapi/query.cgi",
             params={
@@ -87,7 +114,17 @@ class BaseSynoClient:
         return self.api_map
 
     async def login(self, otp_code: Optional[str] = None) -> str:
-        """Выполняет вход в DSM через `SYNO.API.Auth` и сохраняет `sid`."""
+        """Выполняет вход в DSM через `SYNO.API.Auth` и сохраняет зашифрованный `sid`.
+
+        Args:
+            otp_code: Одноразовый код 2FA (если включена двухфакторная защита).
+
+        Returns:
+            str: Полученный идентификатор сессии (`sid`).
+
+        Raises:
+            DsmAuthError: Если логин, пароль или OTP-код неверны.
+        """
         if not self.api_map:
             try:
                 await self.discover_apis()
@@ -143,7 +180,15 @@ class BaseSynoClient:
             self._clear_session()
 
     def _resolve_cgi_and_version(self, api_name: str, default_version: int = 1) -> tuple[str, int]:
-        """Определяет путь CGI-обработчика и максимальную поддерживаемую версию API."""
+        """Определяет путь CGI-обработчика и максимальную поддерживаемую версию API.
+
+        Args:
+            api_name: Имя интерфейса API (например, `SYNO.Docker.Container`).
+            default_version: Версия по умолчанию, если API отсутствует в карте.
+
+        Returns:
+            tuple[str, int]: Кортеж `(путь_к_cgi, версия)`.
+        """
         if api_name in self.api_map:
             info = self.api_map[api_name]
             path = info.get("path", "entry.cgi").lstrip("/")
@@ -161,7 +206,24 @@ class BaseSynoClient:
         files: Optional[dict[str, Any]] = None,
         retry_auth: bool = True,
     ) -> dict[str, Any]:
-        """Выполняет авторизованный запрос к Synology DSM Web API."""
+        """Выполняет авторизованный запрос к Synology DSM Web API.
+
+        Args:
+            api_name: Имя вызываемого интерфейса API.
+            method: Вызываемый метод интерфейса.
+            version: Версия API (определяется автоматически, если None).
+            params: Дополнительные параметры вызова.
+            http_method: HTTP-метод (`GET` или `POST`).
+            files: Файлы для multipart/form-data загрузки.
+            retry_auth: Разрешить ли автоматический повторный вход при протухании `sid`.
+
+        Returns:
+            dict[str, Any]: Содержимое поля `data` успешного ответа DSM.
+
+        Raises:
+            DsmAuthError: При ошибке авторизации.
+            DsmApiError: При любой прикладной ошибке API.
+        """
         if not self.sid:
             await self.login()
         elif not self.api_map:

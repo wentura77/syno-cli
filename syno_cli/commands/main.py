@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 import typer
 
+from syno_cli.commands.auth_cmd import auth_app
 from syno_cli.client.base import BaseSynoClient
 from syno_cli.client.core import SynoCoreClient
 from syno_cli.client.docker import SynoDockerClient
@@ -33,6 +34,7 @@ vm_app = typer.Typer(help="Управление виртуальными маш�
 files_app = typer.Typer(help="Управление файлами и папками на хранилище (File Station).")
 download_app = typer.Typer(help="Мониторинг и управление закачками (Download Station).")
 
+app.add_typer(auth_app, name="auth")
 app.add_typer(docker_app, name="docker")
 app.add_typer(vm_app, name="vm")
 app.add_typer(files_app, name="files")
