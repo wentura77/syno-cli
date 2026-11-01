@@ -380,6 +380,21 @@ def download_add(
 
     asyncio.run(_impl())
 
+@download_app.command("delete")
+def download_delete(
+    task_id: str = typer.Argument(..., help="ID задачи (например, dbid_1)"),
+    force: bool = typer.Option(False, "--force", "-f", help="Принудительно завершить и удалить/переместить данные"),
+) -> None:
+    """Удалить задачу из Download Station."""
+    async def _impl() -> None:
+        base = BaseSynoClient()
+        try:
+            await SynoDownloadStationClient(base).delete_task(task_id, force_complete=force)
+            console.print(f"[bold red]✓ Задача '{task_id}' удалена[/bold red]")
+        finally:
+            await base.close()
+
+    asyncio.run(_impl())
 
 @download_app.command("pause")
 def download_pause(task_id: str = typer.Argument(..., help="ID задачи (например dbid_1)")) -> None:
