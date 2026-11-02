@@ -2,6 +2,14 @@
 
 import asyncio
 from pathlib import Path
+from rich.progress import (
+    BarColumn,
+    DownloadColumn,
+    Progress,
+    TextColumn,
+    TimeRemainingColumn,
+    TransferSpeedColumn,
+)
 import typer
 
 from syno_cli.client.base import BaseSynoClient
@@ -54,7 +62,11 @@ def files_ls(
 
 @files_app.command("mkdir")
 def files_mkdir(
-    parent_path: str = typer.Argument(..., help="Родительский каталог"),
+    parent_path: str = typer.Argument(
+        ...,
+        autocompletion=complete_remote_path,
+        help="Родительский каталог на NAS",
+    ),
     name: str = typer.Argument(..., help="Имя новой папки"),
 ) -> None:
     """Создать новую директорию в хранилище File Station.
@@ -68,7 +80,9 @@ def files_mkdir(
         base = BaseSynoClient()
         try:
             await SynoFileStationClient(base).mkdir(parent_path, name)
-            console.print(f"[bold green]✓ Папка '{parent_path.rstrip('/')}/{name}' создана[/bold green]")
+            console.print(
+                f"[bold green]✓ Папка '{parent_path.rstrip('/')}/{name}' создана[/bold green]"
+            )
         finally:
             await base.close()
 
@@ -77,21 +91,118 @@ def files_mkdir(
 
 @files_app.command("upload")
 def files_upload(
-    local_file: Path = typer.Argument(..., help="Путь к локальному файлу"),
-    remote_dir: str = typer.Argument(..., help="Целевая папка на NAS"),
+    local_file: Path = typer.Argument(..., help="Путь к локальному файлу на компьютере"),
+    remote_dir: str = typer.Argument(
+        ...,
+        autocompletion=complete_remote_path,
+        help="Целевая папка на NAS (например, /docker или /video/Films)",
+    ),
+    overwrite: bool = typer.Option(
+        True,
+        "--overwrite/--no-overwrite",
+        help="Перезаписывать существующий файл в целевой папке",
+    ),
 ) -> None:
     """Загрузить локальный файл на сетевое хранилище Synology NAS.
 
     Args:
         local_file: Путь к файлу на локальном компьютере.
         remote_dir: Целевой каталог сохранения в File Station.
+        overwrite: Флаг перезаписи файла.
     """
+    resolved_local = local_file.expanduser()
+    if not resolved_local.is_file():
+        console.print(f"[bold red]✗ Локальный файл не найден:[/bold red] {local_file}")
+        raise typer.Exit(code=1)
+
     async def _impl() -> None:
-        """Асинхронно загрузить файл через multipart-запрос."""
+        """Асинхронно загрузить файл через потоковый поток с индикатором прогресса."""
         base = BaseSynoClient()
         try:
-            await SynoFileStationClient(base).upload_file(local_file, remote_dir)
-            console.print(f"[bold green]✓ Файл '{local_file.name}' загружен в '{remote_dir}'[/bold green]")
+            total_size = resolved_local.stat().st_size
+            with Progress(
+                TextColumn("[bold blue]⬆ {task.fields[filename]}"),
+                BarColumn(),
+                DownloadColumn(),
+                TransferSpeedColumn(),
+                TimeRemainingColumn(),
+                console=console,
+            ) as progress:
+                task_id = progress.add_task(
+                    "upload", filename=resolved_local.name, total=total_size
+                )
+
+                def _on_chunk(chunk_len: int) -> None:
+                    progress.update(task_id, advance=chunk_len)
+
+                await SynoFileStationClient(base).upload_file(
+                    local_path=resolved_local,
+                    dest_folder_path=remote_dir,
+                    overwrite=overwrite,
+                    progress_callback=_on_chunk,
+                )
+
+            console.print(
+                f"[bold green]✓ Файл '{resolved_local.name}' успешно загружен в '{remote_dir}'[/bold green]"
+            )
+        finally:
+            await base.close()
+
+    asyncio.run(_impl())
+
+
+@files_app.command("download")
+def files_download(
+    remote_path: str = typer.Argument(
+        ...,
+        autocompletion=complete_remote_path,
+        help="Полный путь к файлу на NAS (например, /docker/compose.yml)",
+    ),
+    dest: Path = typer.Option(
+        Path("."),
+        "--dest",
+        "-d",
+        help="Локальная папка или файл назначения (по умолчанию: текущая папка)",
+    ),
+) -> None:
+    """Скачать файл с Synology NAS на локальный компьютер.
+
+    Args:
+        remote_path: Путь к файлу на сетевом хранилище в File Station.
+        dest: Локальный путь сохранения файла.
+    """
+    async def _impl() -> None:
+        """Асинхронно скачать файл с отображением прогресс-бара."""
+        base = BaseSynoClient()
+        try:
+            fs = SynoFileStationClient(base)
+            filename = Path(remote_path.rstrip("/")).name
+            with Progress(
+                TextColumn("[bold cyan]⬇ {task.fields[filename]}"),
+                BarColumn(),
+                DownloadColumn(),
+                TransferSpeedColumn(),
+                TimeRemainingColumn(),
+                console=console,
+            ) as progress:
+                task_id = progress.add_task("download", filename=filename, total=None)
+
+                def _on_progress(downloaded: int, total: int) -> None:
+                    progress.update(
+                        task_id,
+                        completed=downloaded,
+                        total=total if total > 0 else None,
+                    )
+
+                saved_path = await fs.download_file(
+                    remote_path=remote_path,
+                    local_dest_path=dest,
+                    progress_callback=_on_progress,
+                )
+
+            console.print(
+                f"[bold green]✓ Файл успешно сохранен:[/bold green] {saved_path.resolve()}"
+            )
         finally:
             await base.close()
 
@@ -100,7 +211,11 @@ def files_upload(
 
 @files_app.command("rm")
 def files_rm(
-    remote_path: str = typer.Argument(..., help="Путь к удаляемому файлу или папке"),
+    remote_path: str = typer.Argument(
+        ...,
+        autocompletion=complete_remote_path,
+        help="Путь к удаляемому файлу или папке на NAS",
+    ),
 ) -> None:
     """Удалить файл или папку на хранилище Synology NAS.
 

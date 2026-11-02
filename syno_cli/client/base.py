@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+import ssl
 from typing import Any, Optional
 import httpx
 
@@ -10,14 +11,25 @@ from syno_cli.exceptions import DsmApiError, DsmAuthError
 from syno_cli.session_storage import BaseSessionStorage, get_session_storage
 
 
+def _create_ssl_context() -> ssl.SSLContext:
+    """Создает SSL-контекст для работы с самоподписанными сертификатами Synology DSM.
+
+    Returns:
+        ssl.SSLContext: Настроенный SSL-контекст без проверки имени хоста.
+    """
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
 class BaseSynoClient:
     """Базовый клиент Synology DSM Web API с шифрованием сессии.
 
     Отвечает за:
     - обнаружение доступных эндпоинтов через `SYNO.API.Info`;
     - аутентификацию через `SYNO.API.Auth` с поддержкой 2FA (OTP);
-    - защищенное кэширование токена сессии (`sid`) и карты API в `user_cache_dir`
-      с аппаратным шифрованием Fernet (`machine-id`) или в системном `keyring`;
+    - защищенное кэширование токена сессии (`sid`) и карты API в `user_cache_dir`;
     - автоматический перелогин при истечении сессии (коды 105, 106, 107, 119).
     """
 
@@ -37,6 +49,7 @@ class BaseSynoClient:
         self.config = config or default_settings
         self.sid: Optional[str] = None
         self.api_map: dict[str, dict[str, Any]] = {}
+        self._transport = transport
 
         # Если в тестах передан кастомный путь session_file, используем файловый бэкенд
         custom_file_override = self.config.session_file != DEFAULT_SESSION_FILE
@@ -50,11 +63,13 @@ class BaseSynoClient:
             file_path=Path(self.config.session_file),
         )
 
+        verify_ssl: Any = _create_ssl_context() if self.config.secure else False
         self.client = httpx.AsyncClient(
             base_url=self.config.base_url,
-            verify=False,
-            timeout=30.0,
+            verify=verify_ssl,
+            timeout=httpx.Timeout(120.0, connect=15.0),
             transport=transport,
+            follow_redirects=True,
         )
         self._load_session()
 
@@ -233,7 +248,11 @@ class BaseSynoClient:
                 pass
 
         cgi_path, resolved_ver = self._resolve_cgi_and_version(api_name, version or 1)
-        use_version = resolved_ver if api_name in self.api_map else (version or resolved_ver)
+        use_version = (
+            version
+            if version is not None
+            else (resolved_ver if api_name in self.api_map else 1)
+        )
 
         req_params: dict[str, Any] = {
             "api": api_name,
@@ -248,22 +267,28 @@ class BaseSynoClient:
                 elif v is not None:
                     req_params[k] = v
 
+        req_headers = {"Cookie": f"id={self.sid}"} if self.sid else None
+
         if http_method.upper() == "POST":
             if files:
                 query_params = {
                     "api": api_name,
                     "version": str(use_version),
                     "method": method,
-                    "_sid": self.sid,
+                    "_sid": str(self.sid),
                 }
                 form_data = {k: str(v) for k, v in (params or {}).items() if v is not None}
                 resp = await self.client.post(
-                    cgi_path, params=query_params, data=form_data, files=files
+                    cgi_path,
+                    params=query_params,
+                    data=form_data,
+                    files=files,
+                    headers=req_headers,
                 )
             else:
-                resp = await self.client.post(cgi_path, data=req_params)
+                resp = await self.client.post(cgi_path, data=req_params, headers=req_headers)
         else:
-            resp = await self.client.get(cgi_path, params=req_params)
+            resp = await self.client.get(cgi_path, params=req_params, headers=req_headers)
 
         resp.raise_for_status()
         body = resp.json()

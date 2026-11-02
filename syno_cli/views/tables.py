@@ -253,6 +253,7 @@ def render_files(
         time_info = additional.get("time", {})
 
         field = sort_by.lower()
+        val: Any
         if field == "size":
             val = int(additional.get("size", 0))
         elif field in ("mtime", "time", "date"):

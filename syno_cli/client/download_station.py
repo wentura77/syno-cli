@@ -138,7 +138,7 @@ class SynoDownloadStationClient:
 
             # ВАЖНО: _sid передается в URL (params) и cookies, иначе multipart-парсер DSM выдает ошибку 119
             query_params = {"_sid": str(self.base.sid)}
-            cookies = {"id": str(self.base.sid)}
+            auth_headers = {"Cookie": f"id={self.base.sid}"}
 
             form_data: dict[str, str] = {
                 "api": "SYNO.DownloadStation2.Task",
@@ -156,7 +156,7 @@ class SynoDownloadStationClient:
                 params=query_params,
                 data=form_data,
                 files=files,
-                cookies=cookies,
+                headers=auth_headers,
             )
             resp.raise_for_status()
             body = resp.json()
@@ -177,7 +177,7 @@ class SynoDownloadStationClient:
         # Способ 2: Классический SYNO.DownloadStation.Task (через DownloadStation/task.cgi)
         cgi_v1, ver_v1 = self.base._resolve_cgi_and_version("SYNO.DownloadStation.Task", 2)
         query_v1 = {"_sid": str(self.base.sid)}
-        cookies_v1 = {"id": str(self.base.sid)}
+        auth_headers_v1 = {"Cookie": f"id={self.base.sid}"}
         form_v1: dict[str, str] = {
             "api": "SYNO.DownloadStation.Task",
             "version": str(min(ver_v1, 3)),
@@ -192,7 +192,7 @@ class SynoDownloadStationClient:
             params=query_v1,
             data=form_v1,
             files=files_v1,
-            cookies=cookies_v1,
+            headers=auth_headers_v1,
         )
         resp_v1.raise_for_status()
         body_v1 = resp_v1.json()

@@ -52,6 +52,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 filterwarnings = [
+    "ignore::DeprecationWarning:httpx.*",
     "ignore::DeprecationWarning:pytest_asyncio.*",
 ]
 

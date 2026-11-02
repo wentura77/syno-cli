@@ -15,7 +15,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-# Корневые команды: status, storage
+# Системные команды верхнего уровня: status, storage
 register_system_commands(app)
 
 # Подгруппы команд
