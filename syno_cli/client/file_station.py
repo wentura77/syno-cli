@@ -27,7 +27,7 @@ class SynoFileStationClient:
         Возвращает список корневых папок общего доступа (Shared Folders).
 
         Returns:
-            list[dict[str, Any]]: Список общих папок с их путями и размерами.
+            list[dict[str, Any]]: Список общих папок с их путями, размерами и временем.
         """
         data = await self.base.request(
             "SYNO.FileStation.List",
@@ -45,16 +45,21 @@ class SynoFileStationClient:
             folder_path (str): Путь в File Station (например, `/docker` или `/video`).
 
         Returns:
-            list[dict[str, Any]]: Список объектов файлов и директорий.
+            list[dict[str, Any]]: Список объектов файлов и директорий с метаданными.
         """
-        if folder_path == "/":
+        clean_path = folder_path.strip()
+        if clean_path != "/":
+            clean_path = clean_path.rstrip("/")
+
+        if not clean_path or clean_path == "/":
             return await self.list_shares()
+
         data = await self.base.request(
             "SYNO.FileStation.List",
             "list",
             version=2,
             params={
-                "folder_path": folder_path,
+                "folder_path": clean_path,
                 "additional": ["real_path", "size", "time", "perm"],
             },
         )
@@ -65,17 +70,18 @@ class SynoFileStationClient:
         Создает новую папку внутри указанного каталога.
 
         Args:
-            folder_path (str): Родительский путь в File Station.
-            name (str): Имя новой директории.
+            folder_path: Родительский путь в File Station.
+            name: Имя новой директории.
 
         Returns:
             dict[str, Any]: Данные о созданной папке.
         """
+        clean_parent = folder_path.rstrip("/") if folder_path != "/" else "/"
         return await self.base.request(
             "SYNO.FileStation.CreateFolder",
             "create",
             version=2,
-            params={"folder_path": [folder_path], "name": [name]},
+            params={"folder_path": [clean_parent], "name": [name]},
             http_method="POST",
         )
 
@@ -93,10 +99,11 @@ class SynoFileStationClient:
         Returns:
             dict[str, Any]: Ответ сервера о завершении загрузки файла.
         """
+        clean_dest = dest_folder_path.rstrip("/") if dest_folder_path != "/" else "/"
         file_bytes = local_path.read_bytes()
         files = {"file": (local_path.name, file_bytes, "application/octet-stream")}
         params = {
-            "path": dest_folder_path,
+            "path": clean_dest,
             "create_parents": "true",
             "overwrite": "true" if overwrite else "false",
         }
@@ -119,11 +126,12 @@ class SynoFileStationClient:
         Returns:
             dict[str, Any]: Ответ сервера.
         """
+        clean_path = path.rstrip("/") if path != "/" else "/"
         return await self.base.request(
             "SYNO.FileStation.Delete",
             "delete",
             version=2,
-            params={"path": [path]},
+            params={"path": [clean_path]},
             http_method="POST",
         )
 
@@ -141,13 +149,15 @@ class SynoFileStationClient:
         Returns:
             dict[str, Any]: Идентификатор задачи копирования/перемещения.
         """
+        clean_src = src_path.rstrip("/") if src_path != "/" else "/"
+        clean_dest = dest_folder_path.rstrip("/") if dest_folder_path != "/" else "/"
         return await self.base.request(
             "SYNO.FileStation.CopyMove",
             "start",
             version=3,
             params={
-                "path": [src_path],
-                "dest_folder_path": dest_folder_path,
+                "path": [clean_src],
+                "dest_folder_path": clean_dest,
                 "overwrite": True,
                 "remove_src": remove_src,
             },
@@ -168,7 +178,8 @@ class SynoFileStationClient:
         Returns:
             dict[str, Any]: Сгенерированная ссылка в списке `links`.
         """
-        params: dict[str, Any] = {"path": [path]}
+        clean_path = path.rstrip("/") if path != "/" else "/"
+        params: dict[str, Any] = {"path": [clean_path]}
         if password:
             params["password"] = password
         if date_expired:

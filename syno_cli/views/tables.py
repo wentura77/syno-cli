@@ -1,6 +1,7 @@
 """Генераторы консольных таблиц Rich для всех подсистем Synology NAS."""
 
-from typing import Any
+from datetime import datetime
+from typing import Any, Optional
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -15,14 +16,28 @@ from syno_cli.views.formatters import (
 console = Console()
 
 
-def render_system_status(sys_info: dict[str, Any], util: dict[str, Any]) -> None:
-    """
-    Выводит сводную панель состояния Synology NAS (модель, DSM, CPU, RAM, температура).
+def format_timestamp(ts: Optional[int | float | str]) -> str:
+    """Преобразует Unix-timestamp в читаемый формат даты и времени.
 
     Args:
-        sys_info (dict[str, Any]): Данные из `SYNO.Core.System`.
-        util (dict[str, Any]): Данные из `SYNO.Core.System.Utilization`.
+        ts: Время в секундах (Unix epoch) или None.
+
+    Returns:
+        Отформатированная строка вида 'YYYY-MM-DD HH:MM' или '—'.
     """
+    if not ts or ts == "—":
+        return "—"
+    try:
+        val = int(ts)
+        if val <= 0:
+            return "—"
+        return datetime.fromtimestamp(val).strftime("%Y-%m-%d %H:%M")
+    except (ValueError, TypeError, OSError):
+        return str(ts)
+
+
+def render_system_status(sys_info: dict[str, Any], util: dict[str, Any]) -> None:
+    """Выводит сводную панель состояния Synology NAS."""
     model = sys_info.get("model", "Synology NAS")
     dsm_ver = sys_info.get("firmware_ver") or sys_info.get("version_string", "DSM")
     temp = sys_info.get("sys_temp", "—")
@@ -152,40 +167,80 @@ def render_vms(guests: list[dict[str, Any]]) -> None:
     console.print(table)
 
 
-def render_files(items: list[dict[str, Any]], current_path: str) -> None:
-    """
-    Выводит содержимое директории File Station в виде таблицы.
+def render_files(
+    items: list[dict[str, Any]],
+    current_path: str,
+    sort_by: str = "mtime",
+    reverse: bool = True,
+) -> None:
+    """Выводит содержимое директории File Station с поддержкой сортировки.
 
     Args:
-        items (list[dict[str, Any]]): Список файлов и папок.
-        current_path (str): Отображаемый путь.
+        items: Список файлов и папок, полученных от DSM Web API.
+        current_path: Отображаемый путь к текущему каталогу.
+        sort_by: Поле сортировки ('name', 'size', 'mtime', 'crtime').
+        reverse: Инвертировать порядок сортировки (по убыванию).
     """
-    table = Table(title=f"Содержимое каталога: {current_path}")
-    table.add_column("Тип", width=6)
-    table.add_column("Имя", style="bold white")
-    table.add_column("Путь", style="dim")
-    table.add_column("Размер", justify="right")
+    def _sort_key(item: dict[str, Any]) -> tuple[int, Any]:
+        is_dir = 0 if item.get("isdir", True) else 1
+        additional = item.get("additional", {})
+        time_info = additional.get("time", {})
 
-    for item in items:
+        field = sort_by.lower()
+        if field == "size":
+            val = int(additional.get("size", 0))
+        elif field in ("mtime", "time", "date"):
+            val = int(time_info.get("mtime", 0)) if isinstance(time_info, dict) else 0
+        elif field in ("crtime", "created"):
+            val = int(time_info.get("crtime", 0)) if isinstance(time_info, dict) else 0
+        else:
+            val = str(item.get("name", "")).lower()
+
+        return (is_dir, val)
+
+    sorted_items = sorted(items, key=_sort_key, reverse=reverse)
+
+    if not sorted_items:
+        console.print(f"[dim]📁 Каталог '{current_path}' пуст.[/dim]")
+        return
+
+    sort_title = f" (сортировка: {sort_by}{', убыв.' if reverse else ''})"
+    table = Table(title=f"Содержимое каталога: {current_path}{sort_title}")
+    table.add_column("Тип", width=7)
+    table.add_column("Имя", style="bold white")
+    table.add_column("Размер", justify="right")
+    table.add_column("Изменен", style="cyan", no_wrap=True)
+    table.add_column("Создан", style="dim", no_wrap=True)
+    table.add_column("Путь", style="dim")
+
+    for item in sorted_items:
         is_dir = item.get("isdir", True)
         icon = "📁 DIR" if is_dir else "📄 FILE"
         name = item.get("name", "—")
         path = item.get("path", "—")
-        size = int(item.get("additional", {}).get("size", 0))
+
+        additional = item.get("additional", {})
+        size = int(additional.get("size", 0))
         size_str = "—" if is_dir else format_bytes(size)
-        table.add_row(icon, name, path, size_str)
+
+        time_info = additional.get("time", {})
+        mtime = time_info.get("mtime") if isinstance(time_info, dict) else None
+        crtime = time_info.get("crtime") if isinstance(time_info, dict) else None
+
+        table.add_row(
+            icon,
+            name,
+            size_str,
+            format_timestamp(mtime),
+            format_timestamp(crtime),
+            path,
+        )
 
     console.print(table)
 
 
 def render_downloads(tasks: list[dict[str, Any]], stats: dict[str, Any] | None = None) -> None:
-    """
-    Выводит сводку скоростей и таблицу активных задач в Download Station.
-
-    Args:
-        tasks (list[dict[str, Any]]): Список задач из `SYNO.DownloadStation.Task`.
-        stats (dict[str, Any] | None): Статистика скоростей из `SYNO.DownloadStation.Statistic`.
-    """
+    """Выводит сводку скоростей, директорию сохранения и таблицу активных задач в Download Station."""
     if stats:
         dl_speed = format_speed(int(stats.get("speed_download", 0)))
         ul_speed = format_speed(int(stats.get("speed_upload", 0)))
@@ -213,11 +268,11 @@ def render_downloads(tasks: list[dict[str, Any]], stats: dict[str, Any] | None =
         title = t.get("title", "—")
         status = t.get("status", "unknown")
         size = int(t.get("size", 0))
-        
+
         additional = t.get("additional", {})
         detail = additional.get("detail", {})
         destination = detail.get("destination", "—")
-        
+
         transfer = additional.get("transfer", {})
         downloaded = int(transfer.get("size_downloaded", 0))
         speed_dl = int(transfer.get("speed_download", 0))
