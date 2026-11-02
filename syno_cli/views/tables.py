@@ -1,6 +1,7 @@
 """Генераторы консольных таблиц Rich для всех подсистем Synology NAS."""
 
 from datetime import datetime
+from pathlib import PurePosixPath
 from typing import Any, Optional
 from rich.console import Console
 from rich.panel import Panel
@@ -34,6 +35,71 @@ def format_timestamp(ts: Optional[int | float | str]) -> str:
         return datetime.fromtimestamp(val).strftime("%Y-%m-%d %H:%M")
     except (ValueError, TypeError, OSError):
         return str(ts)
+
+
+def detect_file_type(name: str, is_dir: bool) -> str:
+    """Определяет категорию и тип объекта по его имени и расширению.
+
+    Args:
+        name: Имя файла или директории.
+        is_dir: Флаг, является ли объект директорией.
+
+    Returns:
+        Строка с иконкой и категорией/расширением (например, '📁 DIR', '🎬 MKV').
+    """
+    if is_dir:
+        return "📁 DIR"
+
+    ext = PurePosixPath(name).suffix.lower()
+    if not ext:
+        return "📄 FILE"
+
+    type_map = {
+        # Видео
+        ".mkv": "🎬 MKV",
+        ".mp4": "🎬 MP4",
+        ".avi": "🎬 AVI",
+        ".mov": "🎬 MOV",
+        ".wmv": "🎬 WMV",
+        ".m4v": "🎬 M4V",
+        # Музыка
+        ".mp3": "🎵 MP3",
+        ".flac": "🎵 FLAC",
+        ".wav": "🎵 WAV",
+        ".aac": "🎵 AAC",
+        ".ogg": "🎵 OGG",
+        # Картинки
+        ".jpg": "🖼️ JPG",
+        ".jpeg": "🖼️ JPEG",
+        ".png": "🖼️ PNG",
+        ".gif": "🖼️ GIF",
+        ".webp": "🖼️ WEBP",
+        ".svg": "🖼️ SVG",
+        # Архивы / Образы
+        ".zip": "📦 ZIP",
+        ".rar": "📦 RAR",
+        ".7z": "📦 7Z",
+        ".tar": "📦 TAR",
+        ".gz": "📦 GZ",
+        ".iso": "💿 ISO",
+        # Документы
+        ".pdf": "📕 PDF",
+        ".txt": "📄 TXT",
+        ".doc": "📘 DOC",
+        ".docx": "📘 DOCX",
+        ".xls": "📊 XLS",
+        ".xlsx": "📊 XLSX",
+        # Торренты
+        ".torrent": "🧲 TORR",
+        # Конфиги / Скрипты
+        ".json": "⚙️ JSON",
+        ".yaml": "⚙️ YAML",
+        ".yml": "⚙️ YML",
+        ".sh": "⚡ SH",
+        ".py": "🐍 PY",
+    }
+
+    return type_map.get(ext, f"📄 {ext[1:].upper()[:4]}")
 
 
 def render_system_status(sys_info: dict[str, Any], util: dict[str, Any]) -> None:
@@ -173,7 +239,7 @@ def render_files(
     sort_by: str = "mtime",
     reverse: bool = True,
 ) -> None:
-    """Выводит содержимое директории File Station с поддержкой сортировки.
+    """Выводит содержимое директории File Station с поддержкой категорий и сортировки.
 
     Args:
         items: Список файлов и папок, полученных от DSM Web API.
@@ -206,7 +272,7 @@ def render_files(
 
     sort_title = f" (сортировка: {sort_by}{', убыв.' if reverse else ''})"
     table = Table(title=f"Содержимое каталога: {current_path}{sort_title}")
-    table.add_column("Тип", width=7)
+    table.add_column("Тип", width=9)
     table.add_column("Имя", style="bold white")
     table.add_column("Размер", justify="right")
     table.add_column("Изменен", style="cyan", no_wrap=True)
@@ -215,8 +281,8 @@ def render_files(
 
     for item in sorted_items:
         is_dir = item.get("isdir", True)
-        icon = "📁 DIR" if is_dir else "📄 FILE"
         name = item.get("name", "—")
+        icon_type = detect_file_type(name, is_dir)
         path = item.get("path", "—")
 
         additional = item.get("additional", {})
@@ -228,7 +294,7 @@ def render_files(
         crtime = time_info.get("crtime") if isinstance(time_info, dict) else None
 
         table.add_row(
-            icon,
+            icon_type,
             name,
             size_str,
             format_timestamp(mtime),
