@@ -30,8 +30,6 @@ from keyring.errors import KeyringError
 logger = logging.getLogger(__name__)
 
 _STATIC_SALT: bytes = b"syno-dsm-webapi-node-unique-salt-v1"
-KEYRING_SERVICE_NAME: str = "syno_cli"
-KEYRING_SESSION_KEY: str = "dsm_session"
 
 
 def get_machine_fingerprint() -> bytes:
@@ -90,7 +88,7 @@ def get_host_cipher() -> Fernet:
 
 
 class BaseSessionStorage(ABC):
-    """Абстрактный базовый класс для всех бэкендов хранения сессии Synology DSM."""
+    """Абстрактный базовый класс бэкенда хранения сессии."""
 
     @abstractmethod
     def load(self) -> dict[str, Any]:
@@ -192,7 +190,11 @@ class EncryptedFileStorage(BaseSessionStorage):
 
 
 class KeyringStorage(BaseSessionStorage):
-    """Хранилище сессии в системной связке ключей ОС (`keyring`)."""
+    """Хранилище сессии в системной связке ключей ОС."""
+
+    def __init__(self, service_name: str = "syno_cli", session_key: str = "dsm_session") -> None:
+        self.service_name = service_name
+        self.session_key = session_key
 
     def load(self) -> dict[str, Any]:
         """Извлекает JSON с данными сессии из системного хранилища паролей.
@@ -201,13 +203,13 @@ class KeyringStorage(BaseSessionStorage):
             dict[str, Any]: Словарь сессии или пустой словарь.
         """
         try:
-            data = keyring.get_password(KEYRING_SERVICE_NAME, KEYRING_SESSION_KEY)
+            data = keyring.get_password(self.service_name, self.session_key)
             if data:
                 parsed = json.loads(data)
                 if isinstance(parsed, dict):
                     return dict(parsed)
         except Exception as exc:
-            logger.debug("Не удалось загрузить сессию из системного keyring: %s", exc)
+            logger.debug("Не удалось загрузить сессию из keyring: %s", exc)
         return {}
 
     def save(self, session_data: dict[str, Any]) -> None:
@@ -223,7 +225,7 @@ class KeyringStorage(BaseSessionStorage):
             return
         try:
             raw_json = json.dumps(session_data)
-            keyring.set_password(KEYRING_SERVICE_NAME, KEYRING_SESSION_KEY, raw_json)
+            keyring.set_password(self.service_name, self.session_key, raw_json)
         except Exception as exc:
             logger.warning("Ошибка записи сессии в системный keyring: %s", exc)
             raise KeyringError(f"Не удалось сохранить сессию в keyring: {exc}") from exc
@@ -231,12 +233,16 @@ class KeyringStorage(BaseSessionStorage):
     def clear(self) -> None:
         """Удаляет запись сессии из системной связки ключей."""
         try:
-            keyring.delete_password(KEYRING_SERVICE_NAME, KEYRING_SESSION_KEY)
+            keyring.delete_password(self.service_name, self.session_key)
         except Exception:
             pass
 
 
-def get_session_storage(backend: str, file_path: Path) -> BaseSessionStorage:
+def get_session_storage(
+    backend: str,
+    file_path: Path,
+    service_name: str = "syno_cli",
+) -> BaseSessionStorage:
     """Фабричная функция выбора и инициализации бэкенда хранения сессии.
 
     Args:
@@ -248,7 +254,7 @@ def get_session_storage(backend: str, file_path: Path) -> BaseSessionStorage:
     """
     backend_norm = backend.strip().lower()
     if backend_norm == "keyring":
-        return KeyringStorage()
+        return KeyringStorage(service_name=service_name)
     if backend_norm == "file":
         return EncryptedFileStorage(file_path)
 
@@ -256,7 +262,7 @@ def get_session_storage(backend: str, file_path: Path) -> BaseSessionStorage:
         kr = keyring.get_keyring()
         kr_name = kr.__class__.__name__.lower()
         if "fail" not in kr_name and "null" not in kr_name and "chainer" not in kr_name:
-            return KeyringStorage()
+            return KeyringStorage(service_name=service_name)
     except Exception:
         pass
 
