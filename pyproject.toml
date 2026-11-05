@@ -24,6 +24,8 @@ pytest-asyncio = "^0.23.6"
 mypy = "^1.10.0"
 darglint = "^1.8.1"
 interrogate = "^1.5.0"
+pre-commit = "^4.7.0"
+ruff = "^0.17.3"
 
 
 [tool.poetry.scripts]
@@ -33,19 +35,6 @@ syno = "syno_cli.commands.main:run"
 docstring_style = "google"
 strictness = "full"
 ignore_raise = ["DsmApiError", "DsmAuthError", "DsmTaskNotFoundError"]
-
-[tool.interrogate]
-ignore-init-method = true
-ignore-init-module = true
-ignore-magic = true
-ignore-semiprivate = true
-ignore-private = true
-ignore-property-decorators = true
-ignore-nested-functions = true
-ignore-nested-classes = true
-fail-under = 90
-exclude = ["tests", "dist", "build"]
-color = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -59,3 +48,37 @@ filterwarnings = [
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = [".venv", "build", "dist", ".git", "__pycache__"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+
+[tool.interrogate]
+ignore-init-method = true
+ignore-init-module = true
+ignore-magic = true
+ignore-semiprivate = true
+ignore-private = true
+ignore-property-decorators = true
+ignore-nested-functions = true
+fail-under = 90
+exclude = ["tests", ".venv", "dist", "build"]
+verbose = 1
+color = true
