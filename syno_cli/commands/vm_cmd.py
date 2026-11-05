@@ -2,6 +2,7 @@
 
 import asyncio
 from typing import Optional
+
 import typer
 
 from syno_cli.client.base import BaseSynoClient
@@ -14,6 +15,7 @@ vm_app = typer.Typer(help="Управление виртуальными маш�
 @vm_app.command("list")
 def vm_list() -> None:
     """Вывести список виртуальных машин и их текущее состояние."""
+
     async def _impl() -> None:
         """Асинхронно получить и отобразить список виртуальных машин."""
         base = BaseSynoClient()
@@ -30,7 +32,9 @@ def vm_list() -> None:
 @vm_app.command("image-import")
 def vm_image_import(
     name: str = typer.Option(..., "--name", "-n", help="Имя образа в VMM"),
-    path: str = typer.Option(..., "--path", "-p", help="Путь к ISO/OVA на NAS (например /isos/ubuntu.iso)"),
+    path: str = typer.Option(
+        ..., "--path", "-p", help="Путь к ISO/OVA на NAS (например /isos/ubuntu.iso)"
+    ),
     image_type: str = typer.Option("iso", "--type", "-t", help="Тип образа: iso, vdisk, ova"),
 ) -> None:
     """Импортировать установочный образ (ISO/OVA) из хранилища NAS в VMM.
@@ -40,13 +44,16 @@ def vm_image_import(
         path: Полный путь к файлу на томе Synology.
         image_type: Формат импортируемого файла (iso, vdisk, ova).
     """
+
     async def _impl() -> None:
         """Асинхронно импортировать образ диска или ISO."""
         base = BaseSynoClient()
         try:
             vmm = SynoVmmClient(base)
             await vmm.import_image(image_name=name, ds_file_path=path, image_type=image_type)
-            console.print(f"[bold green]✓ Образ '{name}' ({image_type}) добавлен в VMM[/bold green]")
+            console.print(
+                f"[bold green]✓ Образ '{name}' ({image_type}) добавлен в VMM[/bold green]"
+            )
         finally:
             await base.close()
 
@@ -72,6 +79,7 @@ def vm_create(
         disk_gb: Размер системного виртуального диска в гигабайтах.
         iso: Опциональное имя зарегистрированного ISO для загрузки.
     """
+
     async def _impl() -> None:
         """Асинхронно отправить запрос создания виртуальной машины."""
         base = BaseSynoClient()
@@ -99,6 +107,7 @@ def vm_start(name: str = typer.Argument(..., help="Имя виртуальной
     Args:
         name: Имя целевой виртуальной машины.
     """
+
     async def _impl() -> None:
         """Асинхронно отправить сигнал включения ВМ."""
         base = BaseSynoClient()
@@ -118,6 +127,7 @@ def vm_stop(name: str = typer.Argument(..., help="Имя виртуальной 
     Args:
         name: Имя целевой виртуальной машины.
     """
+
     async def _impl() -> None:
         """Асинхронно отправить сигнал мягкого завершения работы ВМ."""
         base = BaseSynoClient()

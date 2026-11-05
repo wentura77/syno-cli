@@ -1,8 +1,8 @@
 """Модульные тесты шифрования сессии (.syno_session.json) и учетных данных с привязкой к ПК."""
 
 from pathlib import Path
+
 from cryptography.fernet import Fernet
-import pytest
 
 from syno_cli.credential_storage import (
     load_credentials_from_file,

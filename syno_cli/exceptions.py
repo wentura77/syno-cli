@@ -31,7 +31,9 @@ class DsmApiError(Exception):
         message (str): Человекочитаемое описание ошибки.
     """
 
-    def __init__(self, code: int, api_name: Optional[str] = None, details: Optional[str] = None) -> None:
+    def __init__(
+        self, code: int, api_name: Optional[str] = None, details: Optional[str] = None
+    ) -> None:
         self.code = code
         self.api_name = api_name
         base_msg = DSM_ERROR_CODES.get(code, f"Неизвестный код ошибки DSM ({code})")

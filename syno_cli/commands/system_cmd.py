@@ -1,6 +1,7 @@
 """Команды системного мониторинга и состояния дисков Synology NAS."""
 
 import asyncio
+
 import typer
 
 from syno_cli.client.base import BaseSynoClient
@@ -20,6 +21,7 @@ def register_system_commands(app: typer.Typer) -> None:
     @app.command("status")
     def cmd_status() -> None:
         """Показать сводный статус Synology NAS (CPU, RAM, температура, аптайм)."""
+
         async def _impl() -> None:
             """Асинхронно запросить и отрендерить системный статус."""
             base = BaseSynoClient()
@@ -36,6 +38,7 @@ def register_system_commands(app: typer.Typer) -> None:
     @app.command("storage")
     def cmd_storage() -> None:
         """Показать состояние физических дисков, температуру и статус SMART."""
+
         async def _impl() -> None:
             """Асинхронно запросить и вывести состояние накопителей."""
             base = BaseSynoClient()

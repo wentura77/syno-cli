@@ -1,6 +1,7 @@
 """Клиент мониторинга системных ресурсов, хранилища и питания Synology DSM."""
 
 from typing import Any
+
 from syno_cli.client.base import BaseSynoClient
 
 
@@ -55,9 +56,7 @@ class SynoCoreClient:
         Returns:
             dict[str, Any]: Ответ сервера о запуске перезагрузки.
         """
-        return await self.base.request(
-            "SYNO.Core.System", "reboot", version=1, http_method="POST"
-        )
+        return await self.base.request("SYNO.Core.System", "reboot", version=1, http_method="POST")
 
     async def shutdown(self) -> dict[str, Any]:
         """

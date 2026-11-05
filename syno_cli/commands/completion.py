@@ -1,12 +1,13 @@
 """Хелперы динамического автодополнения путей Synology NAS в шелле."""
 
 import asyncio
-from typing import List
+from typing import Any, List
+
 from syno_cli.client.base import BaseSynoClient
 from syno_cli.client.file_station import SynoFileStationClient
 
 
-def complete_remote_path(ctx, args, incomplete: str) -> List[str]:
+def complete_remote_path(ctx: Any, args: Any, incomplete: str) -> List[str]:
     """Динамически запрашивает пути с Synology NAS для автодополнения по Tab.
 
     Args:
@@ -17,6 +18,7 @@ def complete_remote_path(ctx, args, incomplete: str) -> List[str]:
     Returns:
         Список подходящих путей на NAS.
     """
+
     async def _fetch() -> List[str]:
         base = BaseSynoClient()
         try:

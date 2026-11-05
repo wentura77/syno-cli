@@ -2,6 +2,7 @@
 
 import asyncio
 from typing import Optional
+
 import typer
 
 from syno_cli.client.base import BaseSynoClient
@@ -14,6 +15,7 @@ download_app = typer.Typer(help="Мониторинг и управление з
 @download_app.command("list")
 def download_list() -> None:
     """Отобразить суммарную скорость и текущий список задач Download Station."""
+
     async def _impl() -> None:
         """Асинхронно получить статистику и перечень задач закачки."""
         base = BaseSynoClient()
@@ -39,6 +41,7 @@ def download_add(
         uri: Сетевая ссылка (HTTP/FTP/Magnet) или путь к локальному `.torrent`-файлу.
         dest: Опциональная папка назначения на NAS.
     """
+
     async def _impl() -> None:
         """Асинхронно добавить задачу скачивания."""
         base = BaseSynoClient()
@@ -54,7 +57,9 @@ def download_add(
 @download_app.command("delete")
 def download_delete(
     task_id: str = typer.Argument(..., help="ID задачи (например, dbid_1)"),
-    force: bool = typer.Option(False, "--force", "-f", help="Принудительно завершить и удалить/переместить данные"),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Принудительно завершить и удалить/переместить данные"
+    ),
 ) -> None:
     """Удалить задачу из очереди Download Station.
 
@@ -62,6 +67,7 @@ def download_delete(
         task_id: Идентификатор удаляемой задачи в DSM.
         force: Принудительно завершить процесс скачивания и очистить данные.
     """
+
     async def _impl() -> None:
         """Асинхронно удалить задачу из списка."""
         base = BaseSynoClient()
@@ -81,6 +87,7 @@ def download_pause(task_id: str = typer.Argument(..., help="ID задачи (н�
     Args:
         task_id: Идентификатор задачи в Download Station.
     """
+
     async def _impl() -> None:
         """Асинхронно поставить задачу скачивания на паузу."""
         base = BaseSynoClient()
@@ -100,6 +107,7 @@ def download_resume(task_id: str = typer.Argument(..., help="ID задачи (н
     Args:
         task_id: Идентификатор задачи в Download Station.
     """
+
     async def _impl() -> None:
         """Асинхронно возобновить задачу скачивания."""
         base = BaseSynoClient()

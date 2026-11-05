@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from types import TracebackType
-from typing import Optional, Type
+from typing import Any, Optional, Type
 
 import httpx
 
@@ -55,7 +55,7 @@ class SynoDSM:
         if settings is not None:
             cfg = settings
         else:
-            cfg_params: dict = {"secure": secure, "session_backend": session_backend}
+            cfg_params: dict[str, Any] = {"secure": secure, "session_backend": session_backend}
             if host is not None:
                 cfg_params["host"] = host
             if port is not None:

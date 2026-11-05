@@ -1,6 +1,7 @@
 """CLI-команды для безопасного управления логином, паролем и сессионным кэшем Synology NAS."""
 
 from pathlib import Path
+
 import typer
 
 from syno_cli.config import USER_CACHE_DIR, USER_CONFIG_DIR, USER_CONFIG_FILE, settings
@@ -86,10 +87,16 @@ def auth_status() -> None:
     console.print(f"[bold cyan]Пользователь:[/bold cyan]         {settings.user}")
     console.print(f"[bold cyan]Бэкенд безопасности:[/bold cyan]  {settings.session_backend}")
     console.print(f"[bold cyan]Папка конфигурации:[/bold cyan]   {USER_CONFIG_DIR}")
-    console.print(f"[bold cyan]Конфиг-файл:[/bold cyan]          {USER_CONFIG_FILE} ({'существует' if USER_CONFIG_FILE.exists() else 'нет'})")
-    console.print(f"[bold cyan]Файл учетных данных:[/bold cyan]  {cred_path} ({'существует' if cred_path.exists() else 'нет'})")
+    console.print(
+        f"[bold cyan]Конфиг-файл:[/bold cyan]          {USER_CONFIG_FILE} ({'существует' if USER_CONFIG_FILE.exists() else 'нет'})"
+    )
+    console.print(
+        f"[bold cyan]Файл учетных данных:[/bold cyan]  {cred_path} ({'существует' if cred_path.exists() else 'нет'})"
+    )
     console.print(f"[bold cyan]Папка кэша:[/bold cyan]           {USER_CACHE_DIR}")
-    console.print(f"[bold cyan]Файл кэша сессии:[/bold cyan]     {session_path} ({'существует' if session_path.exists() else 'нет'})")
+    console.print(
+        f"[bold cyan]Файл кэша сессии:[/bold cyan]     {session_path} ({'существует' if session_path.exists() else 'нет'})"
+    )
     console.print(
         f"[bold cyan]Пароль в хранилище:[/bold cyan]   "
         f"{'🟢 Загружен из защищенного хранилища' if has_creds else '⚪ Используется .env / дефолт'}"

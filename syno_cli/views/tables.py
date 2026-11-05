@@ -3,6 +3,7 @@
 from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Any, Optional
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -124,7 +125,9 @@ def render_system_status(sys_info: dict[str, Any], util: dict[str, Any]) -> None
     table.add_row("Загрузка CPU:", f"{cpu_load}%")
     table.add_row("Использование RAM:", f"{mem_usage}%")
 
-    console.print(Panel(table, title="[bold blue]Сводка состояния Synology NAS[/bold blue]", expand=False))
+    console.print(
+        Panel(table, title="[bold blue]Сводка состояния Synology NAS[/bold blue]", expand=False)
+    )
 
 
 def render_storage_disks(storage_data: dict[str, Any]) -> None:
@@ -247,6 +250,7 @@ def render_files(
         sort_by: Поле сортировки ('name', 'size', 'mtime', 'crtime').
         reverse: Инвертировать порядок сортировки (по убыванию).
     """
+
     def _sort_key(item: dict[str, Any]) -> tuple[int, Any]:
         is_dir = 0 if item.get("isdir", True) else 1
         additional = item.get("additional", {})

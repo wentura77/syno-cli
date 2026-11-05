@@ -1,12 +1,14 @@
 """Базовый асинхронный HTTP-клиент для взаимодействия с Synology DSM Web API."""
 
 import json
-from pathlib import Path
 import ssl
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, Optional, cast
+
 import httpx
 
-from syno_cli.config import DEFAULT_SESSION_FILE, SynoSettings, settings as default_settings
+from syno_cli.config import DEFAULT_SESSION_FILE, SynoSettings
+from syno_cli.config import settings as default_settings
 from syno_cli.exceptions import DsmApiError, DsmAuthError
 from syno_cli.session_storage import BaseSessionStorage, get_session_storage
 
@@ -249,9 +251,7 @@ class BaseSynoClient:
 
         cgi_path, resolved_ver = self._resolve_cgi_and_version(api_name, version or 1)
         use_version = (
-            version
-            if version is not None
-            else (resolved_ver if api_name in self.api_map else 1)
+            version if version is not None else (resolved_ver if api_name in self.api_map else 1)
         )
 
         req_params: dict[str, Any] = {
@@ -311,7 +311,8 @@ class BaseSynoClient:
                 raise DsmAuthError(code=code, api_name=api_name)
             raise DsmApiError(code=code, api_name=api_name)
 
-        return body.get("data", {})
+        data = body.get("data", {})
+        return cast(dict[str, Any], data) if isinstance(data, dict) else {}
 
     async def close(self) -> None:
         """Закрывает асинхронную HTTP-сессию клиента."""

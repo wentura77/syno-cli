@@ -3,7 +3,8 @@
 import io
 import json
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, cast
+
 import httpx
 
 from syno_cli.client.base import BaseSynoClient
@@ -221,7 +222,8 @@ class SynoFileStationClient:
                 raise DsmAuthError(code=code, api_name="SYNO.FileStation.Upload")
             raise DsmApiError(code=code, api_name="SYNO.FileStation.Upload")
 
-        return body.get("data", {})
+        data = body.get("data", {})
+        return cast(dict[str, Any], data) if isinstance(data, dict) else {}
 
     async def download_file(
         self,

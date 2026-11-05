@@ -2,6 +2,8 @@
 
 import asyncio
 from pathlib import Path
+
+import typer
 from rich.progress import (
     BarColumn,
     DownloadColumn,
@@ -10,7 +12,6 @@ from rich.progress import (
     TimeRemainingColumn,
     TransferSpeedColumn,
 )
-import typer
 
 from syno_cli.client.base import BaseSynoClient
 from syno_cli.client.file_station import SynoFileStationClient
@@ -47,6 +48,7 @@ def files_ls(
         sort: Критерий сортировки (mtime, name, size, crtime).
         reverse: Инвертировать порядок сортировки.
     """
+
     async def _impl() -> None:
         """Асинхронно получить и вывести отсортированное содержимое каталога."""
         base = BaseSynoClient()
@@ -75,6 +77,7 @@ def files_mkdir(
         parent_path: Путь к родительскому каталогу.
         name: Имя создаваемой директории.
     """
+
     async def _impl() -> None:
         """Асинхронно создать директорию на томе."""
         base = BaseSynoClient()
@@ -171,6 +174,7 @@ def files_download(
         remote_path: Путь к файлу на сетевом хранилище в File Station.
         dest: Локальный путь сохранения файла.
     """
+
     async def _impl() -> None:
         """Асинхронно скачать файл с отображением прогресс-бара."""
         base = BaseSynoClient()
@@ -222,6 +226,7 @@ def files_rm(
     Args:
         remote_path: Полный путь к удаляемому объекту в File Station.
     """
+
     async def _impl() -> None:
         """Асинхронно удалить путь в File Station."""
         base = BaseSynoClient()

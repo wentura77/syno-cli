@@ -2,6 +2,7 @@
 
 import asyncio
 from typing import Optional
+
 import typer
 
 from syno_cli.client.base import BaseSynoClient
@@ -18,6 +19,7 @@ docker_app = typer.Typer(help="Управление контейнерами, о
 @docker_app.command("ps")
 def docker_ps() -> None:
     """Вывести список всех контейнеров Docker и их текущие статусы."""
+
     async def _impl() -> None:
         """Асинхронно получить и отобразить список контейнеров."""
         base = BaseSynoClient()
@@ -34,6 +36,7 @@ def docker_ps() -> None:
 @docker_app.command("images")
 def docker_images() -> None:
     """Вывести список загруженных локальных Docker-образов."""
+
     async def _impl() -> None:
         """Асинхронно получить и отобразить локальные образы."""
         base = BaseSynoClient()
@@ -88,6 +91,7 @@ def docker_run(
         volume: Список монтируемых каталогов в формате хост:контейнер.
         env: Список переменных окружения в формате КЛЮЧ=ЗНАЧЕНИЕ.
     """
+
     async def _impl() -> None:
         """Асинхронно создать и запустить контейнер."""
         base = BaseSynoClient()
@@ -101,7 +105,9 @@ def docker_run(
                 env_vars=env,
                 auto_start=True,
             )
-            console.print(f"[bold green]✓ Контейнер '{name}' ({image}) создан и запущен[/bold green]")
+            console.print(
+                f"[bold green]✓ Контейнер '{name}' ({image}) создан и запущен[/bold green]"
+            )
         finally:
             await base.close()
 
@@ -115,6 +121,7 @@ def docker_start(name: str = typer.Argument(..., help="Имя контейнер
     Args:
         name: Имя целевого контейнера.
     """
+
     async def _impl() -> None:
         """Асинхронно отправить команду запуска контейнера."""
         base = BaseSynoClient()
@@ -134,6 +141,7 @@ def docker_stop(name: str = typer.Argument(..., help="Имя контейнер�
     Args:
         name: Имя целевого контейнера.
     """
+
     async def _impl() -> None:
         """Асинхронно отправить команду остановки контейнера."""
         base = BaseSynoClient()

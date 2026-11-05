@@ -11,20 +11,20 @@
    macOS Keychain, Windows Credential Locker).
 """
 
-from abc import ABC, abstractmethod
 import base64
 import getpass
 import json
 import logging
-from pathlib import Path
 import platform
 import subprocess
+from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any
 
+import keyring
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-import keyring
 from keyring.errors import KeyringError
 
 logger = logging.getLogger(__name__)

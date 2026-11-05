@@ -1,5 +1,7 @@
 """Тесты аутентификации, перелогина при истечении сессии и системного статуса."""
 
+from pathlib import Path
+
 import httpx
 import pytest
 
@@ -19,7 +21,7 @@ def test_formatters() -> None:
 
 
 @pytest.mark.asyncio
-async def test_login_and_auto_relogin(tmp_path) -> None:
+async def test_login_and_auto_relogin(tmp_path: Path) -> None:
     """Проверяет первичный логин, кэширование SID и автоперелогин при коде 119."""
     session_file = tmp_path / ".syno_session.json"
     cfg = SynoSettings(
@@ -69,7 +71,7 @@ async def test_login_and_auto_relogin(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_login_invalid_credentials(tmp_path) -> None:
+async def test_login_invalid_credentials(tmp_path: Path) -> None:
     """Проверяет выброс исключения DsmAuthError при коде ошибки 400."""
     cfg = SynoSettings(host="mock-nas", session_file=tmp_path / ".session.json")
 

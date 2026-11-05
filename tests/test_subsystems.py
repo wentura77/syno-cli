@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from urllib.parse import parse_qs
+
 import httpx
 import pytest
 
@@ -14,7 +15,7 @@ from syno_cli.config import SynoSettings
 
 
 @pytest.mark.asyncio
-async def test_docker_and_vmm_operations(tmp_path) -> None:
+async def test_docker_and_vmm_operations(tmp_path: Path) -> None:
     """Проверяет операции pull/create в Docker и создание ВМ/импорт образа в VMM."""
     cfg = SynoSettings(host="mock-nas", session_file=tmp_path / ".session.json")
     recorded_calls: list[dict[str, str]] = []
@@ -74,7 +75,7 @@ async def test_docker_and_vmm_operations(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_files_and_downloads(tmp_path) -> None:
+async def test_files_and_downloads(tmp_path: Path) -> None:
     """Проверяет листинг/загрузку файлов в File Station и очередь Download Station."""
     cfg = SynoSettings(host="mock-nas", session_file=tmp_path / ".session.json")
     sample_file: Path = tmp_path / "hello.txt"
@@ -94,7 +95,9 @@ async def test_files_and_downloads(tmp_path) -> None:
                 json={
                     "success": True,
                     "data": {
-                        "files": [{"name": "hello.txt", "path": "/docker/hello.txt", "isdir": False}]
+                        "files": [
+                            {"name": "hello.txt", "path": "/docker/hello.txt", "isdir": False}
+                        ]
                     },
                 },
             )
@@ -118,7 +121,10 @@ async def test_files_and_downloads(tmp_path) -> None:
                                 "status": "downloading",
                                 "size": 2097152,
                                 "additional": {
-                                    "transfer": {"size_downloaded": 1048576, "speed_download": 1048576}
+                                    "transfer": {
+                                        "size_downloaded": 1048576,
+                                        "speed_download": 1048576,
+                                    }
                                 },
                             }
                         ]

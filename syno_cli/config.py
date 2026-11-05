@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from typing import Literal, Optional
+
 from platformdirs import user_cache_dir, user_config_dir
 from pydantic_settings import BaseSettings, SettingsConfigDict
 

@@ -2,7 +2,8 @@
 
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
+
 from syno_cli.client.base import BaseSynoClient
 from syno_cli.exceptions import DsmApiError
 
@@ -41,7 +42,10 @@ class SynoDownloadStationClient:
                     details="Пакет 'Download Station' не установлен или остановлен в Центре пакетов DSM",
                 )
 
-        if "SYNO.DownloadStation2.Task" in self.base.api_map and "SYNO.DownloadStation.Task" not in self.base.api_map:
+        if (
+            "SYNO.DownloadStation2.Task" in self.base.api_map
+            and "SYNO.DownloadStation.Task" not in self.base.api_map
+        ):
             data = await self.base.request(
                 "SYNO.DownloadStation2.Task",
                 "list",
@@ -162,7 +166,8 @@ class SynoDownloadStationClient:
             body = resp.json()
 
             if body.get("success"):
-                return body.get("data", {})
+                data = body.get("data", {})
+                return cast(dict[str, Any], data) if isinstance(data, dict) else {}
 
             code = body.get("error", {}).get("code", 100)
             if code in (105, 106, 107, 119) and retry_auth:
@@ -205,7 +210,8 @@ class SynoDownloadStationClient:
                 return await self._add_local_file_task(file_path, clean_dest, retry_auth=False)
             raise DsmApiError(code=code_v1, api_name="SYNO.DownloadStation.Task")
 
-        return body_v1.get("data", {})
+        data_v1 = body_v1.get("data", {})
+        return cast(dict[str, Any], data_v1) if isinstance(data_v1, dict) else {}
 
     async def pause_task(self, task_id: str) -> dict[str, Any]:
         """Приостанавливает выполнение задачи скачивания."""

@@ -1,6 +1,7 @@
 """Клиент управления виртуальными машинами Synology Virtual Machine Manager (VMM)."""
 
 from typing import Any
+
 from syno_cli.client.base import BaseSynoClient
 
 
@@ -62,9 +63,7 @@ class SynoVmmClient:
         Returns:
             list[dict[str, Any]]: Список образов в хранилище VMM.
         """
-        data = await self.base.request(
-            "SYNO.Virtualization.API.Guest.Image", "list", version=1
-        )
+        data = await self.base.request("SYNO.Virtualization.API.Guest.Image", "list", version=1)
         return list(data.get("images", []))
 
     async def import_image(

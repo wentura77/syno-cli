@@ -1,6 +1,7 @@
 """Клиент управления пакетом Container Manager (Docker) через DSM Web API."""
 
 from typing import Any, Optional
+
 from syno_cli.client.base import BaseSynoClient
 
 

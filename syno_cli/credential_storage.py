@@ -11,6 +11,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Optional
+
 import keyring
 
 from syno_cli.session_storage import get_host_cipher
