@@ -1,6 +1,7 @@
 """Клиент мониторинга и управления задачами закачки в Download Station."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Optional, cast
 
@@ -89,7 +90,11 @@ class SynoDownloadStationClient:
         await self._ensure_ready()
 
         # В Download Station путь destination НЕ должен начинаться со слэша '/'
-        clean_dest = destination.lstrip("/") if destination else None
+        clean_dest: Optional[str] = None
+        if destination:
+            normalized = destination.replace("\\", "/").strip("/ ")
+            normalized = re.sub(r"/+", "/", normalized)
+            clean_dest = normalized if normalized else None
 
         local_file = Path(uri).expanduser()
         if local_file.is_file():

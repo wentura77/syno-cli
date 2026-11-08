@@ -40,10 +40,10 @@ class SynoSettings(BaseSettings):
     """
 
     host: str = "192.168.1.100"
-    port: int = 5000
+    port: int = 5001
     user: str = ""
     password: str = ""
-    secure: bool = False
+    secure: bool = True
     otp_code: Optional[str] = None
 
     session_backend: Literal["auto", "keyring", "file"] = "file"
