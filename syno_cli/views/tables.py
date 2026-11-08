@@ -206,7 +206,7 @@ def render_docker_images(images: list[dict[str, Any]]) -> None:
     console.print(table)
 
 
-def render_vms(guests: list[dict[str, Any]]) -> None:
+def render_vmm_guests(guests: list[dict[str, Any]]) -> None:
     """
     Выводит таблицу виртуальных машин из Virtual Machine Manager (VMM).
 
@@ -467,5 +467,29 @@ def render_system_logs(logs: list[dict[str, Any]]) -> None:
         desc = str(item.get("descr", item.get("msg", item.get("text", "—")))).strip()
 
         table.add_row(time_str, level_fmt, user, desc)
+
+    console.print(table)
+
+
+def render_vmm_images(images: list[dict[str, Any]]) -> None:
+    """Выводит таблицу образов и шаблонов дисков в Synology VMM."""
+    if not images:
+        console.print("[dim]В репозитории VMM нет зарегистрированных образов.[/dim]")
+        return
+
+    table = Table(title="Образы и шаблоны Virtual Machine Manager", header_style="bold magenta")
+    table.add_column("Имя образа", style="bold cyan")
+    table.add_column("ID", style="dim")
+    table.add_column("Тип", justify="center")
+    table.add_column("Статус", justify="center")
+    table.add_column("Размер", justify="right")
+
+    for img in images:
+        name = img.get("image_name", img.get("name", "—"))
+        img_id = img.get("image_id", img.get("id", "—"))
+        img_type = str(img.get("type", "iso")).upper()
+        status = colorize_status(str(img.get("status", "ready")))
+        size = format_bytes(int(img.get("size", 0)))
+        table.add_row(name, img_id, img_type, status, size)
 
     console.print(table)
