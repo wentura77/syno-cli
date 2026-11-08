@@ -125,6 +125,72 @@ class SynoDockerClient:
             http_method="POST",
         )
 
+    async def delete_container(self, name: str, force: bool = False) -> dict[str, Any]:
+        """Удаляет контейнер с Synology NAS."""
+        clean_name = name.lstrip("/")
+        params = {
+            "name": f'"{clean_name}"',
+            "force": "true" if force else "false",
+        }
+        data = await self.base.request(
+            "SYNO.Docker.Container",
+            "delete",
+            version=1,
+            params=params,
+            http_method="POST",
+        )
+        return data if isinstance(data, dict) else {}
+
+    async def get_container_stats(self, name: Optional[str] = None) -> list[dict[str, Any]]:
+        """Запрашивает статистику утилизации ресурсов (CPU, RAM, сеть, диск) контейнерами."""
+        params: dict[str, Any] = {}
+        if name:
+            params["name"] = name
+        data = await self.base.request(
+            "SYNO.Docker.Container.Resource",
+            "get",
+            version=1,
+            params=params,
+        )
+        stats = data.get("resources", data.get("containers", []))
+        if isinstance(stats, dict) and "cpu" in stats:
+            return [{"name": name or "unknown", **stats}]
+        return list(stats) if isinstance(stats, list) else []
+
+    async def get_container_logs(self, name: str, tail: int = 100) -> list[str]:
+        """Возвращает последние строки журнала событий (логов) контейнера.
+
+        Использует SYNO.Docker.Container.Log с обязательными параметрами sort_dir и name.
+        """
+        clean_name = name.lstrip("/")
+        params = {
+            "name": f'"{clean_name}"',
+            "limit": tail,
+            "offset": 0,
+            "sort_dir": '"DESC"',
+        }
+
+        data = await self.base.request(
+            "SYNO.Docker.Container.Log",
+            "get",
+            version=1,
+            params=params,
+            http_method="POST",
+        )
+        logs = data.get("logs", [])
+        if not isinstance(logs, list):
+            return []
+
+        res: list[str] = []
+        for item in reversed(logs):
+            if isinstance(item, dict):
+                text = str(item.get("text") or item.get("log") or item.get("msg") or "").strip()
+                stream_type = str(item.get("stream") or "stdout")
+                res.append(f"[{stream_type}] {text}")
+            else:
+                res.append(str(item).strip())
+        return res
+
     async def create_container(
         self,
         name: str,
@@ -148,101 +214,130 @@ class SynoDockerClient:
         Returns:
             dict[str, Any]: Ответ DSM API с деталями созданного контейнера.
         """
-        port_bindings = []
-        for p in ports or []:
-            if ":" in p:
-                host_p, cont_p = p.split(":", 1)
-                port_bindings.append(
-                    {
-                        "host_port": str(host_p),
-                        "container_port": str(cont_p),
-                        "type": "tcp",
-                    }
-                )
-
-        volume_bindings = []
-        for v in volumes or []:
-            if ":" in v:
-                host_v, mount_v = v.split(":", 1)
-                volume_bindings.append(
-                    {
-                        "host_volume_file": host_v,
-                        "mount_point": mount_v,
-                        "type": "rw",
-                    }
-                )
-
-        env_list = []
-        for e in env_vars or []:
-            if "=" in e:
-                k, val = e.split("=", 1)
-                env_list.append({"key": k, "value": val})
-
-        profile = {
+        container_config: dict[str, Any] = {
             "name": name,
             "image": image,
-            "port_bindings": port_bindings,
-            "volume_bindings": volume_bindings,
-            "env_variables": env_list,
+            "is_auto_start": auto_start,
         }
 
-        created = await self.base.request(
+        if ports:
+            port_bindings = []
+            for p in ports:
+                parts = p.split(":")
+                if len(parts) == 2:
+                    port_bindings.append(
+                        {
+                            "host_port": int(parts[0]),
+                            "container_port": int(parts[1]),
+                            "protocol": "tcp",
+                        }
+                    )
+            container_config["port_bindings"] = port_bindings
+
+        if volumes:
+            binds = []
+            for v in volumes:
+                parts = v.split(":")
+                if len(parts) == 2:
+                    binds.append(
+                        {
+                            "host_volume_file": parts[0],
+                            "mount_point": parts[1],
+                            "type": "bind",
+                        }
+                    )
+            container_config["volume_bindings"] = binds
+
+        if env_vars:
+            container_config["env_variables"] = [
+                {"key": e.split("=", 1)[0], "value": e.split("=", 1)[1] if "=" in e else ""}
+                for e in env_vars
+            ]
+
+        data = await self.base.request(
             "SYNO.Docker.Container",
             "create",
             version=1,
-            params={"profile": profile},
+            params=container_config,
             http_method="POST",
         )
-        if auto_start:
-            await self.start_container(name)
-        return created
+        return data if isinstance(data, dict) else {}
 
     async def list_projects(self) -> list[dict[str, Any]]:
-        """
-        Возвращает список проектов Docker Compose в Container Manager (DSM 7.2+).
+        """Получает список всех проектов Docker Compose."""
+        data = await self.base.request(
+            "SYNO.Docker.Project",
+            "list",
+            version=1,
+            params={"limit": -1, "offset": 0},
+        )
+        return list(data.get("projects", []))
 
-        Returns:
-            list[dict[str, Any]]: Список Compose-проектов.
-        """
-        data = await self.base.request("SYNO.Docker.Project", "list", version=1)
-        if isinstance(data, dict) and "projects" in data:
-            return list(data["projects"])
-        if isinstance(data, dict):
-            return list(data.values())
+    async def build_or_start_project(
+        self,
+        name: str,
+        compose_content: str,
+        env_content: Optional[str] = None,
+        share_path: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Создает или обновляет и запускает проект Docker Compose (up)."""
+        params: dict[str, Any] = {
+            "name": name,
+            "content": compose_content,
+        }
+        if env_content:
+            params["env_content"] = env_content
+        if share_path:
+            params["share_path"] = share_path
+
+        data = await self.base.request(
+            "SYNO.Docker.Project",
+            "build",
+            version=1,
+            params=params,
+            http_method="POST",
+        )
+        return data if isinstance(data, dict) else {}
+
+    async def stop_project(self, name: str) -> dict[str, Any]:
+        """Останавливает проект Docker Compose (down)."""
+        data = await self.base.request(
+            "SYNO.Docker.Project",
+            "clean",
+            version=1,
+            params={"name": name},
+            http_method="POST",
+        )
+        return data if isinstance(data, dict) else {}
+
+    async def restart_project(self, name: str) -> dict[str, Any]:
+        """Перезапускает проект Docker Compose."""
+        data = await self.base.request(
+            "SYNO.Docker.Project",
+            "restart",
+            version=1,
+            params={"name": name},
+            http_method="POST",
+        )
+        return data if isinstance(data, dict) else {}
+
+    async def get_project_logs(self, name: str, tail: int = 100) -> list[str]:
+        """Получает агрегированные логи проекта Docker Compose."""
+        data = await self.base.request(
+            "SYNO.Docker.Project",
+            "get_log",
+            version=1,
+            params={"name": name, "limit": tail, "offset": 0},
+        )
+        logs = data.get("logs", [])
+        if isinstance(logs, list):
+            res: list[str] = []
+            for item in logs:
+                if isinstance(item, dict):
+                    msg = str(item.get("log") or item.get("msg") or "").rstrip()
+                    stream_type = str(item.get("stream") or "stdout")
+                    res.append(f"[{stream_type}] {msg}")
+                else:
+                    res.append(str(item).rstrip())
+            return res
         return []
-
-    async def start_project(self, project_id: str) -> dict[str, Any]:
-        """
-        Запускает проект Docker Compose по его идентификатору или имени.
-
-        Args:
-            project_id (str): Идентификатор или имя проекта.
-
-        Returns:
-            dict[str, Any]: Ответ API.
-        """
-        return await self.base.request(
-            "SYNO.Docker.Project",
-            "start",
-            version=1,
-            params={"id": project_id},
-            http_method="POST",
-        )
-
-    async def stop_project(self, project_id: str) -> dict[str, Any]:
-        """
-        Останавливает проект Docker Compose по его идентификатору или имени.
-
-        Args:
-            project_id (str): Идентификатор или имя проекта.
-
-        Returns:
-            dict[str, Any]: Ответ API.
-        """
-        return await self.base.request(
-            "SYNO.Docker.Project",
-            "stop",
-            version=1,
-            params={"id": project_id},
-            http_method="POST",
-        )

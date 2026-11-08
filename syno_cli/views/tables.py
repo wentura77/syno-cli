@@ -359,3 +359,82 @@ def render_downloads(tasks: list[dict[str, Any]], stats: dict[str, Any] | None =
             format_speed(speed_dl),
         )
     console.print(table)
+
+
+def render_docker_stats(stats: list[dict[str, Any]]) -> None:
+    """Отрисовывает таблицу утилизации ресурсов Docker-контейнерами в реальном времени."""
+    if not stats:
+        console.print("[dim]Нет активных метрик контейнеров Docker.[/dim]")
+        return
+
+    table = Table(title="Docker: Мониторинг утилизации ресурсов", header_style="bold magenta")
+    table.add_column("Контейнер", style="bold white")
+    table.add_column("CPU %", justify="right")
+    table.add_column("RAM Память", justify="right")
+    table.add_column("Сеть (RX / TX)", justify="right")
+    table.add_column("Диск I/O (R / W)", justify="right")
+
+    for item in stats:
+        name = item.get("name", item.get("container_name", "—"))
+        cpu = item.get("cpu", item.get("cpu_percent", 0.0))
+        cpu_str = f"{cpu:.2f}%" if isinstance(cpu, (int, float)) else str(cpu)
+
+        mem_usage = item.get("memory", item.get("memory_usage", 0))
+        mem_str = (
+            format_bytes(int(mem_usage)) if isinstance(mem_usage, (int, float)) else str(mem_usage)
+        )
+
+        rx = format_bytes(int(item.get("network_rx_bytes", item.get("net_rx", 0))))
+        tx = format_bytes(int(item.get("network_tx_bytes", item.get("net_tx", 0))))
+
+        r_io = format_bytes(int(item.get("io_read_bytes", item.get("io_read", 0))))
+        w_io = format_bytes(int(item.get("io_write_bytes", item.get("io_write", 0))))
+
+        table.add_row(
+            name,
+            cpu_str,
+            mem_str,
+            f"{rx} / {tx}",
+            f"{r_io} / {w_io}",
+        )
+
+    console.print(table)
+
+
+def render_docker_logs(logs: list[str]) -> None:
+    """Отображает строки журнала событий Docker-контейнера."""
+    if not logs:
+        console.print("[dim]Логи контейнера пусты.[/dim]")
+        return
+    for line in logs:
+        console.print(line)
+
+
+def render_docker_projects(projects: list[dict[str, Any]]) -> None:
+    """Отрисовывает таблицу проектов Docker Compose."""
+    if not projects:
+        console.print("[dim]Нет созданных проектов Docker Compose.[/dim]")
+        return
+
+    table = Table(title="Docker Compose: Проекты", header_style="bold magenta")
+    table.add_column("Имя проекта", style="bold white")
+    table.add_column("Статус", justify="center")
+    table.add_column("Сервисы (контейнеры)", justify="center")
+    table.add_column("Путь / Папка", style="cyan")
+
+    for proj in projects:
+        name = proj.get("name", "—")
+        status_raw = str(proj.get("status", "")).lower()
+        if status_raw in ("running", "active", "up"):
+            status = "[bold green]Запущен[/bold green]"
+        elif status_raw in ("stopped", "inactive", "down"):
+            status = "[bold red]Остановлен[/bold red]"
+        else:
+            status = f"[yellow]{status_raw or '—'}[/yellow]"
+
+        services_count = len(proj.get("services", proj.get("containers", [])))
+        path_str = proj.get("path", proj.get("share_path", "—"))
+
+        table.add_row(name, status, str(services_count), str(path_str))
+
+    console.print(table)

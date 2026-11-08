@@ -1,5 +1,6 @@
 """CLI-команды управления Docker и Container Manager в Synology DSM."""
 
+from pathlib import Path
 from typing import Any, Optional, Tuple
 
 import typer
@@ -10,9 +11,12 @@ from syno_cli.commands.common import cli_command, console
 from syno_cli.views.tables import (
     render_docker_containers,
     render_docker_images,
+    render_docker_logs,
+    render_docker_projects,
+    render_docker_stats,
 )
 
-docker_app = typer.Typer(help="Управление контейнерами, образами и проектами Docker.")
+docker_app = typer.Typer(help="Управление контейнерами, образами и ресурсами Docker.")
 
 
 @docker_app.command("ps")
@@ -26,6 +30,39 @@ async def docker_ps(
         docker = SynoDockerClient(base)
         containers = await docker.list_containers()
         return containers, render_docker_containers
+    finally:
+        await base.close()
+
+
+@docker_app.command("stats")
+@cli_command(spinner_message="Опрос утилизации ресурсов контейнерами...")
+async def docker_stats(
+    name: Optional[str] = typer.Argument(None, help="Имя конкретного контейнера (опционально)"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Вывод в формате JSON"),
+) -> Tuple[Any, Any]:
+    """Отобразить утилизацию CPU, RAM, диска и сети контейнерами в реальном времени."""
+    base = BaseSynoClient()
+    try:
+        docker = SynoDockerClient(base)
+        stats = await docker.get_container_stats(name)
+        return stats, render_docker_stats
+    finally:
+        await base.close()
+
+
+@docker_app.command("logs")
+@cli_command(spinner_message="Запрос логов контейнера...")
+async def docker_logs(
+    name: str = typer.Argument(..., help="Имя контейнера для чтения логов"),
+    lines: int = typer.Option(100, "--lines", "-n", help="Количество выводимых строк журнала"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Вывод в формате JSON"),
+) -> Tuple[Any, Any]:
+    """Вывести последние строки журнала событий (логов) контейнера."""
+    base = BaseSynoClient()
+    try:
+        docker = SynoDockerClient(base)
+        logs = await docker.get_container_logs(name=name, tail=lines)
+        return logs, render_docker_logs
     finally:
         await base.close()
 
@@ -131,5 +168,162 @@ async def docker_stop(
             result,
             lambda _: console.print(f"[bold yellow]✓ Контейнер '{name}' остановлен[/bold yellow]"),
         )
+    finally:
+        await base.close()
+
+
+@docker_app.command("restart")
+@cli_command(spinner_message="Перезапуск контейнера...")
+async def docker_restart(
+    name: str = typer.Argument(..., help="Имя контейнера"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Вывод в формате JSON"),
+) -> Tuple[Any, Any]:
+    """Перезапустить работающий или остановленный Docker-контейнер."""
+    base = BaseSynoClient()
+    try:
+        result = await SynoDockerClient(base).restart_container(name)
+        return (
+            result,
+            lambda _: console.print(f"[bold green]✓ Контейнер '{name}' перезапущен[/bold green]"),
+        )
+    finally:
+        await base.close()
+
+
+@docker_app.command("rm")
+@cli_command(spinner_message="Удаление контейнера...")
+async def docker_rm(
+    name: str = typer.Argument(..., help="Имя удаляемого контейнера"),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Принудительно удалить работающий контейнер"
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Вывод в формате JSON"),
+) -> Tuple[Any, Any]:
+    """Удалить контейнер с Synology NAS."""
+    base = BaseSynoClient()
+    try:
+        result = await SynoDockerClient(base).delete_container(name, force=force)
+        return (
+            result,
+            lambda _: console.print(f"[bold red]✓ Контейнер '{name}' удален[/bold red]"),
+        )
+    finally:
+        await base.close()
+
+
+compose_app = typer.Typer(help="Управление мультиконтейнерными проектами Docker Compose.")
+docker_app.add_typer(compose_app, name="compose")
+
+
+@compose_app.command("list")
+@cli_command(spinner_message="Запрос проектов Docker Compose...")
+async def compose_list(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Вывод в формате JSON"),
+) -> Tuple[Any, Any]:
+    """Вывести список всех проектов Docker Compose."""
+    base = BaseSynoClient()
+    try:
+        docker = SynoDockerClient(base)
+        projects = await docker.list_projects()
+        return projects, render_docker_projects
+    finally:
+        await base.close()
+
+
+@compose_app.command("up")
+@cli_command(spinner_message="Сборка и развертывание проекта Docker Compose...")
+async def compose_up(
+    name: str = typer.Argument(..., help="Имя проекта Compose"),
+    file_path: Path = typer.Argument(..., help="Локальный путь к docker-compose.yml"),
+    env_file: Optional[Path] = typer.Option(None, "--env-file", "-e", help="Путь к файлу .env"),
+    share_path: Optional[str] = typer.Option(None, "--path", "-p", help="Целевой путь на томе NAS"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Вывод в формате JSON"),
+) -> Tuple[Any, Any]:
+    """Развернуть или обновить проект Docker Compose (up)."""
+    resolved_compose = file_path.expanduser()
+    if not resolved_compose.is_file():
+        raise FileNotFoundError(f"Файл compose не найден: {file_path}")
+
+    compose_text = resolved_compose.read_text(encoding="utf-8")
+    env_text = (
+        env_file.expanduser().read_text(encoding="utf-8")
+        if env_file and env_file.is_file()
+        else None
+    )
+
+    base = BaseSynoClient()
+    try:
+        docker = SynoDockerClient(base)
+        result = await docker.build_or_start_project(
+            name=name,
+            compose_content=compose_text,
+            env_content=env_text,
+            share_path=share_path,
+        )
+        return (
+            result,
+            lambda _: console.print(
+                f"[bold green]✓ Проект Compose '{name}' успешно запущен[/bold green]"
+            ),
+        )
+    finally:
+        await base.close()
+
+
+@compose_app.command("down")
+@cli_command(spinner_message="Остановка проекта Compose...")
+async def compose_down(
+    name: str = typer.Argument(..., help="Имя проекта Compose"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Вывод в формате JSON"),
+) -> Tuple[Any, Any]:
+    """Остановить сервисы проекта Docker Compose (down)."""
+    base = BaseSynoClient()
+    try:
+        docker = SynoDockerClient(base)
+        result = await docker.stop_project(name)
+        return (
+            result,
+            lambda _: console.print(
+                f"[bold yellow]✓ Проект Compose '{name}' остановлен[/bold yellow]"
+            ),
+        )
+    finally:
+        await base.close()
+
+
+@compose_app.command("restart")
+@cli_command(spinner_message="Перезапуск сервисов проекта Compose...")
+async def compose_restart(
+    name: str = typer.Argument(..., help="Имя проекта Compose"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Вывод в формате JSON"),
+) -> Tuple[Any, Any]:
+    """Перезапустить сервисы проекта Docker Compose."""
+    base = BaseSynoClient()
+    try:
+        docker = SynoDockerClient(base)
+        result = await docker.restart_project(name)
+        return (
+            result,
+            lambda _: console.print(
+                f"[bold green]✓ Проект Compose '{name}' перезапущен[/bold green]"
+            ),
+        )
+    finally:
+        await base.close()
+
+
+@compose_app.command("logs")
+@cli_command(spinner_message="Запрос логов проекта Compose...")
+async def compose_logs(
+    name: str = typer.Argument(..., help="Имя проекта Compose"),
+    lines: int = typer.Option(100, "--lines", "-n", help="Количество строк лога"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Вывод в формате JSON"),
+) -> Tuple[Any, Any]:
+    """Вывести агрегированные логи всех сервисов проекта Compose."""
+    base = BaseSynoClient()
+    try:
+        docker = SynoDockerClient(base)
+        logs = await docker.get_project_logs(name=name, tail=lines)
+        return logs, render_docker_logs
     finally:
         await base.close()
