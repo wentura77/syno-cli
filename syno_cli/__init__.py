@@ -5,6 +5,7 @@ from syno_cli.client.core import SynoCoreClient
 from syno_cli.client.docker import SynoDockerClient
 from syno_cli.client.download_station import SynoDownloadStationClient
 from syno_cli.client.file_station import SynoFileStationClient
+from syno_cli.client.logs import SynoLogsClient
 from syno_cli.client.vmm import SynoVmmClient
 from syno_cli.config import SynoSettings, settings
 from syno_cli.exceptions import DsmApiError, DsmAuthError
@@ -16,6 +17,7 @@ __all__ = [
     "SynoCoreClient",
     "SynoFileStationClient",
     "SynoDockerClient",
+    "SynoLogsClient",
     "SynoDownloadStationClient",
     "SynoVmmClient",
     "SynoSettings",

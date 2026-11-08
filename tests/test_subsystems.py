@@ -10,6 +10,7 @@ import pytest
 from syno_cli.client.base import BaseSynoClient
 from syno_cli.client.docker import SynoDockerClient
 from syno_cli.client.download_station import SynoDownloadStationClient
+from syno_cli.client.logs import SynoLogsClient
 from syno_cli.client.vmm import SynoVmmClient
 from syno_cli.config import SynoSettings
 
@@ -221,5 +222,50 @@ async def test_download_station_destination_normalization(tmp_path: Path) -> Non
         assert len(sent_destinations) == 2
         assert sent_destinations[0] == "video/Films"
         assert sent_destinations[1] == "video/Films"
+    finally:
+        await base.close()
+
+
+@pytest.mark.asyncio
+async def test_syslog_operations(tmp_path: Path) -> None:
+    """Проверяет получение системных журналов через SynoLogsClient."""
+    cfg = SynoSettings(host="mock-nas", session_file=tmp_path / ".session.json")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        api = params.get("api", "")
+        if request.method == "POST":
+            from urllib.parse import parse_qs
+
+            form = {k: v[0] for k, v in parse_qs(request.content.decode("utf-8")).items()}
+            api = form.get("api") or api
+
+        if api == "SYNO.API.Auth":
+            return httpx.Response(200, json={"success": True, "data": {"sid": "test_sid"}})
+
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "data": {
+                    "items": [
+                        {
+                            "time": "2026-11-08 19:30:00",
+                            "level": "warn",
+                            "user": "admin",
+                            "descr": "System booted up from abnormal power shutdown",
+                        }
+                    ]
+                },
+            },
+        )
+
+    base = BaseSynoClient(config=cfg, transport=httpx.MockTransport(handler))
+    logs_client = SynoLogsClient(base)
+    try:
+        logs = await logs_client.list_logs(level="warn", limit=10)
+        assert len(logs) == 1
+        assert logs[0]["user"] == "admin"
+        assert logs[0]["level"] == "warn"
     finally:
         await base.close()

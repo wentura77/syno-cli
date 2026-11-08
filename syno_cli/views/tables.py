@@ -438,3 +438,34 @@ def render_docker_projects(projects: list[dict[str, Any]]) -> None:
         table.add_row(name, status, str(services_count), str(path_str))
 
     console.print(table)
+
+
+def render_system_logs(logs: list[dict[str, Any]]) -> None:
+    """Отображает таблицу системного журнала событий DSM."""
+    if not logs:
+        console.print("[dim]Записей в системном журнале не найдено.[/dim]")
+        return
+
+    table = Table(title="Системный журнал событий DSM", header_style="bold magenta")
+    table.add_column("Время", style="cyan", no_wrap=True)
+    table.add_column("Уровень", justify="center")
+    table.add_column("Пользователь", style="bold white")
+    table.add_column("Событие / Описание", style="white")
+
+    for item in logs:
+        time_str = str(item.get("time", item.get("date", "—")))
+        lvl_raw = str(item.get("level", "info")).lower()
+
+        if lvl_raw in ("err", "error", "critical"):
+            level_fmt = "[bold red]ERROR[/bold red]"
+        elif lvl_raw in ("warn", "warning"):
+            level_fmt = "[bold yellow]WARN[/bold yellow]"
+        else:
+            level_fmt = "[green]INFO[/green]"
+
+        user = str(item.get("user", item.get("who", "SYSTEM")))
+        desc = str(item.get("descr", item.get("msg", item.get("text", "—")))).strip()
+
+        table.add_row(time_str, level_fmt, user, desc)
+
+    console.print(table)
