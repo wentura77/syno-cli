@@ -108,7 +108,6 @@ def clear_stored_credentials(file_path: Path) -> None:
     except OSError:
         pass
 
-
 def get_credentials(backend: str, file_path: Path) -> Optional[tuple[str, str]]:
     """Извлекает сохраненные учетные данные из выбранного защищенного бэкенда.
 
@@ -126,8 +125,11 @@ def get_credentials(backend: str, file_path: Path) -> Optional[tuple[str, str]]:
         return load_credentials_from_file(file_path)
 
     if is_keyring_available():
-        creds = load_credentials_from_keyring()
-        if creds and creds[1]:
-            return creds
+        try:
+            creds = load_credentials_from_keyring()
+            if creds and creds[1]:
+                return creds
+        except Exception as exc:
+            logger.debug("Сбой keyring в режиме auto, переключение на файл: %s", exc)
 
     return load_credentials_from_file(file_path)
