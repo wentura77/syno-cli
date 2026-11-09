@@ -1,30 +1,49 @@
 """Вспомогательные функции форматирования размеров данных, скоростей и статусов."""
 
+from typing import Final
+
+from syno_cli.constants import (
+    BYTES_IN_KB,
+    SECONDS_IN_DAY,
+    SECONDS_IN_HOUR,
+    SECONDS_IN_MINUTE,
+)
+
+_SIZE_UNITS: Final[tuple[str, ...]] = ("B", "KB", "MB", "GB", "TB", "PB")
+_GREEN_STATUSES: Final[frozenset[str]] = frozenset(
+    {"running", "up", "normal", "healthy", "finished", "seeding", "ready"}
+)
+_YELLOW_STATUSES: Final[frozenset[str]] = frozenset(
+    {"downloading", "paused", "waiting", "suspended", "starting"}
+)
+_RED_STATUSES: Final[frozenset[str]] = frozenset(
+    {"stopped", "shutdown", "poweroff", "crashed", "degraded", "error"}
+)
+
 
 def format_bytes(size_bytes: int | float) -> str:
     """
     Конвертирует количество байт в человекочитаемую строку (КБ, МБ, ГБ, ТБ).
 
     Args:
-        size_bytes (int | float): Размер в байтах.
+        size_bytes: Размер в байтах.
 
     Returns:
         str: Отформатированная строка (например, `1.50 GB`).
     """
     val = float(max(0, size_bytes))
-    for unit in ("B", "KB", "MB", "GB", "TB", "PB"):
-        if val < 1024.0 or unit == "PB":
+    for unit in _SIZE_UNITS:
+        if val < BYTES_IN_KB or unit == "PB":
             return f"{val:.2f} {unit}" if unit != "B" else f"{int(val)} B"
-        val /= 1024.0
+        val /= BYTES_IN_KB
     return f"{val:.2f} PB"
 
 
 def format_speed(bytes_per_sec: int | float) -> str:
-    """
-    Форматирует скорость передачи данных в человекочитаемый вид.
+    """Форматирует скорость передачи данных в человекочитаемый вид.
 
     Args:
-        bytes_per_sec (int | float): Скорость в байтах в секунду.
+        bytes_per_sec: Скорость в байтах в секунду.
 
     Returns:
         str: Отформатированная скорость (например, `12.40 MB/s`).
@@ -32,41 +51,51 @@ def format_speed(bytes_per_sec: int | float) -> str:
     return f"{format_bytes(bytes_per_sec)}/s"
 
 
-def format_uptime(uptime_val: int | str) -> str:
+def _parse_colon_uptime(raw: str) -> int:
     """
-    Преобразует время непрерывной работы (секунды или строку `HH:MM:SS`) в дни, часы и минуты.
+    Парсит строку времени формата `HH:MM:SS` или `HH:MM` в секунды.
 
     Args:
-        uptime_val (int | str): Количество секунд аптайма или строка вида `'571:13:45'`.
+        raw: Строка с разделителями двоеточия.
+
+    Returns:
+        int: Количество секунд.
+
+    Raises:
+        ValueError: Если формат некорректен.
+    """
+    parts = [int(p) for p in raw.split(":")]
+    if len(parts) == 3:
+        return parts[0] * SECONDS_IN_HOUR + parts[1] * SECONDS_IN_MINUTE + parts[2]
+    if len(parts) == 2:
+        return parts[0] * SECONDS_IN_HOUR + parts[1] * SECONDS_IN_MINUTE
+    raise ValueError(f"Unsupported time format: {raw}")
+
+
+def format_uptime(uptime_val: int | str) -> str:
+    """
+    Преобразует время непрерывной работы в дни, часы и минуты.
+
+    Args:
+        uptime_val: Количество секунд аптайма или строка вида `'571:13:45'`.
 
     Returns:
         str: Читаемая строка аптайма (например, `23д 19ч 13м`).
     """
-    total_seconds = 0
     if isinstance(uptime_val, int):
         total_seconds = uptime_val
-    elif isinstance(uptime_val, str):
+    else:
         raw = uptime_val.strip()
-        if ":" in raw:
-            parts = raw.split(":")
-            try:
-                if len(parts) == 3:
-                    h, m, s = int(parts[0]), int(parts[1]), int(parts[2])
-                    total_seconds = h * 3600 + m * 60 + s
-                elif len(parts) == 2:
-                    h, m = int(parts[0]), int(parts[1])
-                    total_seconds = h * 3600 + m * 60
-            except ValueError:
-                return raw
-        else:
-            try:
-                total_seconds = int(raw)
-            except ValueError:
-                return raw or "—"
+        if not raw:
+            return "—"
+        try:
+            total_seconds = _parse_colon_uptime(raw) if ":" in raw else int(raw)
+        except ValueError:
+            return raw
 
-    days, rem = divmod(max(0, total_seconds), 86400)
-    hours, rem = divmod(rem, 3600)
-    minutes, _ = divmod(rem, 60)
+    days, rem = divmod(max(0, total_seconds), SECONDS_IN_DAY)
+    hours, rem = divmod(rem, SECONDS_IN_HOUR)
+    minutes, _ = divmod(rem, SECONDS_IN_MINUTE)
     if days > 0:
         return f"{days}д {hours:02d}ч {minutes:02d}м"
     return f"{hours:02d}ч {minutes:02d}м"
@@ -77,16 +106,16 @@ def colorize_status(status: str) -> str:
     Оборачивает строковый статус в цветовую разметку библиотеки Rich.
 
     Args:
-        status (str): Исходный текст статуса (`running`, `stopped`, `normal`, `degraded` и т.д.).
+        status: Исходный текст статуса (`running`, `stopped`, `normal` и т.д.).
 
     Returns:
         str: Строка с тегами цвета Rich.
     """
     st = status.lower().strip()
-    if st in ("running", "up", "normal", "healthy", "finished", "seeding"):
+    if st in _GREEN_STATUSES:
         return f"[bold green]● {status}[/bold green]"
-    if st in ("downloading", "paused", "waiting", "suspended"):
+    if st in _YELLOW_STATUSES:
         return f"[bold yellow]◐ {status}[/bold yellow]"
-    if st in ("stopped", "shutdown", "poweroff", "crashed", "degraded", "error"):
+    if st in _RED_STATUSES:
         return f"[bold red]○ {status}[/bold red]"
     return status

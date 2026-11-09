@@ -19,7 +19,7 @@ import platform
 import subprocess
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import keyring
 from cryptography.fernet import Fernet, InvalidToken
@@ -27,9 +27,59 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from keyring.errors import KeyringError
 
+from syno_cli.constants import (
+    PBKDF2_ITERATIONS,
+    PBKDF2_KEY_LENGTH,
+    SECURE_FILE_PERMISSIONS,
+)
+
 logger = logging.getLogger(__name__)
 
-_STATIC_SALT: bytes = b"syno-dsm-webapi-node-unique-salt-v1"
+_STATIC_SALT: Final[bytes] = b"syno-dsm-webapi-node-unique-salt-v1"
+_LINUX_MACHINE_ID_PATHS: Final[tuple[str, ...]] = (
+    "/etc/machine-id",
+    "/var/lib/dbus/machine-id",
+)
+_INVALID_KEYRING_NAMES: Final[tuple[str, ...]] = ("fail", "null", "chainer")
+
+
+def _read_linux_machine_id() -> str:
+    """Читает уникальный идентификатор машины в ОС Linux.
+
+    Returns:
+        str: Содержимое machine-id или пустая строка.
+    """
+    for raw_path in _LINUX_MACHINE_ID_PATHS:
+        path = Path(raw_path)
+        if not path.exists():
+            continue
+        try:
+            machine_id = path.read_text(encoding="utf-8").strip()
+            if machine_id:
+                return machine_id
+        except OSError:
+            continue
+    return ""
+
+
+def _read_darwin_platform_uuid() -> str:
+    """Извлекает аппаратный IOPlatformUUID в macOS.
+
+    Returns:
+        str: Строка UUID или пустая строка.
+    """
+    try:
+        output = subprocess.check_output(
+            ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+            stderr=subprocess.DEVNULL,
+        ).decode("utf-8")
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+    for line in output.splitlines():
+        if "IOPlatformUUID" in line:
+            return line.split("=")[-1].replace('"', "").strip()
+    return ""
 
 
 def get_machine_fingerprint() -> bytes:
@@ -42,27 +92,9 @@ def get_machine_fingerprint() -> bytes:
     machine_id = ""
 
     if system == "Linux":
-        for path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
-            p = Path(path)
-            if p.exists():
-                try:
-                    machine_id = p.read_text(encoding="utf-8").strip()
-                    if machine_id:
-                        break
-                except Exception:
-                    pass
+        machine_id = _read_linux_machine_id()
     elif system == "Darwin":
-        try:
-            out = subprocess.check_output(
-                ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
-                stderr=subprocess.DEVNULL,
-            ).decode("utf-8")
-            for line in out.splitlines():
-                if "IOPlatformUUID" in line:
-                    machine_id = line.split("=")[-1].replace('"', "").strip()
-                    break
-        except Exception:
-            pass
+        machine_id = _read_darwin_platform_uuid()
 
     if not machine_id:
         machine_id = f"{platform.node()}-{platform.machine()}"
@@ -79,9 +111,9 @@ def get_host_cipher() -> Fernet:
     """
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
-        length=32,
+        length=PBKDF2_KEY_LENGTH,
         salt=_STATIC_SALT,
-        iterations=100_000,
+        iterations=PBKDF2_ITERATIONS,
     )
     key = base64.urlsafe_b64encode(kdf.derive(get_machine_fingerprint()))
     return Fernet(key)
@@ -112,14 +144,7 @@ class BaseSessionStorage(ABC):
 
 
 class EncryptedFileStorage(BaseSessionStorage):
-    """Файловое хранилище сессии с шифрованием Fernet и привязкой к хосту.
-
-    Сохраняет JSON-представление сессии (`sid` и `api_map`) в зашифрованный файл
-    с правами доступа `0600` (только для владельца).
-
-    Attributes:
-        file_path: Путь к файлу зашифрованного кэша сессии.
-    """
+    """Файловое хранилище сессии с шифрованием Fernet и привязкой к хосту."""
 
     def __init__(self, file_path: Path) -> None:
         """Инициализирует файловое хранилище сессии.
@@ -129,34 +154,45 @@ class EncryptedFileStorage(BaseSessionStorage):
         """
         self.file_path: Path = file_path
 
+    def _decode_content(self, content: str) -> dict[str, Any]:
+        """Расшифровывает или парсит содержимое файла сессии.
+
+        Args:
+            content: Необработанная строка из файла сессии.
+
+        Returns:
+            dict[str, Any]: Распарсенный словарь сессии.
+        """
+        cipher = get_host_cipher()
+        try:
+            decrypted = cipher.decrypt(content.encode("utf-8")).decode("utf-8")
+            parsed = json.loads(decrypted)
+            return dict(parsed) if isinstance(parsed, dict) else {}
+        except InvalidToken:
+            if content.startswith("{"):
+                parsed_plain = json.loads(content)
+                if isinstance(parsed_plain, dict):
+                    return dict(parsed_plain)
+            raise
+
     def load(self) -> dict[str, Any]:
         """Читает и расшифровывает данные сессии с диска.
-
-        Если файл был сохранен в старом открытом JSON-формате, корректно читает его.
-        При несовпадении ключа машины (файл скопирован с другого ПК) очищает кэш.
 
         Returns:
             dict[str, Any]: Словарь расшифрованной сессии или пустой словарь.
         """
         if not self.file_path.exists():
             return {}
+
         try:
             content = self.file_path.read_text(encoding="utf-8").strip()
             if not content:
                 return {}
-            cipher = get_host_cipher()
-            try:
-                decrypted = cipher.decrypt(content.encode("utf-8")).decode("utf-8")
-                parsed = json.loads(decrypted)
-                return dict(parsed) if isinstance(parsed, dict) else {}
-            except InvalidToken:
-                if content.startswith("{"):
-                    parsed_plain = json.loads(content)
-                    if isinstance(parsed_plain, dict):
-                        return dict(parsed_plain)
-                logger.warning("Не удалось расшифровать сессию (файл перенесен с другого ПК).")
-                self.clear()
-                return {}
+            return self._decode_content(content)
+        except InvalidToken:
+            logger.warning("Не удалось расшифровать сессию (файл перенесен с другого ПК).")
+            self.clear()
+            return {}
         except Exception as exc:
             logger.debug("Ошибка чтения файла сессии %s: %s", self.file_path, exc)
             self.clear()
@@ -176,23 +212,28 @@ class EncryptedFileStorage(BaseSessionStorage):
             raw_json = json.dumps(session_data, indent=2)
             encrypted = cipher.encrypt(raw_json.encode("utf-8")).decode("utf-8")
             self.file_path.write_text(encrypted, encoding="utf-8")
-            self.file_path.chmod(0o600)
+            self.file_path.chmod(SECURE_FILE_PERMISSIONS)
         except Exception as exc:
             logger.warning("Не удалось сохранить зашифрованный файл сессии: %s", exc)
 
     def clear(self) -> None:
         """Удаляет файл кэша сессии с диска."""
-        if self.file_path.exists():
-            try:
-                self.file_path.unlink()
-            except Exception:
-                pass
+        try:
+            self.file_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 class KeyringStorage(BaseSessionStorage):
     """Хранилище сессии в системной связке ключей ОС."""
 
     def __init__(self, service_name: str = "syno_cli", session_key: str = "dsm_session") -> None:
+        """Инициализирует хранилище в системном keyring.
+
+        Args:
+            service_name: Имя сервиса в связке ключей.
+            session_key: Ключ записи сессии.
+        """
         self.service_name = service_name
         self.session_key = session_key
 
@@ -204,13 +245,13 @@ class KeyringStorage(BaseSessionStorage):
         """
         try:
             data = keyring.get_password(self.service_name, self.session_key)
-            if data:
-                parsed = json.loads(data)
-                if isinstance(parsed, dict):
-                    return dict(parsed)
+            if not data:
+                return {}
+            parsed = json.loads(data)
+            return dict(parsed) if isinstance(parsed, dict) else {}
         except Exception as exc:
             logger.debug("Не удалось загрузить сессию из keyring: %s", exc)
-        return {}
+            return {}
 
     def save(self, session_data: dict[str, Any]) -> None:
         """Сохраняет данные сессии в системную связку ключей.
@@ -238,6 +279,19 @@ class KeyringStorage(BaseSessionStorage):
             pass
 
 
+def is_keyring_available() -> bool:
+    """Проверяет наличие рабочего системного бэкенда keyring в ОС.
+
+    Returns:
+        bool: True, если системная связка ключей активна.
+    """
+    try:
+        kr_name = keyring.get_keyring().__class__.__name__.lower()
+        return not any(invalid in kr_name for invalid in _INVALID_KEYRING_NAMES)
+    except Exception:
+        return False
+
+
 def get_session_storage(
     backend: str,
     file_path: Path,
@@ -248,6 +302,7 @@ def get_session_storage(
     Args:
         backend: Выбранный режим хранения (`'auto'`, `'file'` или `'keyring'`).
         file_path: Путь к файлу кэша для файлового бэкенда.
+        service_name: Имя сервиса для системной связки ключей.
 
     Returns:
         BaseSessionStorage: Экземпляр `KeyringStorage` или `EncryptedFileStorage`.
@@ -258,12 +313,6 @@ def get_session_storage(
     if backend_norm == "file":
         return EncryptedFileStorage(file_path)
 
-    try:
-        kr = keyring.get_keyring()
-        kr_name = kr.__class__.__name__.lower()
-        if "fail" not in kr_name and "null" not in kr_name and "chainer" not in kr_name:
-            return KeyringStorage(service_name=service_name)
-    except Exception:
-        pass
-
+    if is_keyring_available():
+        return KeyringStorage(service_name=service_name)
     return EncryptedFileStorage(file_path)

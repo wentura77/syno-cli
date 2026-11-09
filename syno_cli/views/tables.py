@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from pathlib import PurePosixPath
-from typing import Any, Optional
+from typing import Any, Final, Optional
 
 from rich.console import Console
 from rich.panel import Panel
@@ -17,6 +17,45 @@ from syno_cli.views.formatters import (
 
 console = Console()
 
+FILE_TYPE_ICONS: Final[dict[str, str]] = {
+    ".mkv": "🎬 MKV",
+    ".mp4": "🎬 MP4",
+    ".avi": "🎬 AVI",
+    ".mov": "🎬 MOV",
+    ".webm": "🎬 WEBM",
+    ".wmv": "🎬 WMV",
+    ".m4v": "🎬 M4V",
+    ".mp3": "🎵 MP3",
+    ".flac": "🎵 FLAC",
+    ".wav": "🎵 WAV",
+    ".aac": "🎵 AAC",
+    ".ogg": "🎵 OGG",
+    ".jpg": "🖼️ JPG",
+    ".jpeg": "🖼️ JPEG",
+    ".png": "🖼️ PNG",
+    ".gif": "🖼️ GIF",
+    ".webp": "🖼️ WEBP",
+    ".svg": "🖼️ SVG",
+    ".zip": "📦 ZIP",
+    ".rar": "📦 RAR",
+    ".7z": "📦 7Z",
+    ".tar": "📦 TAR",
+    ".gz": "📦 GZ",
+    ".iso": "💿 ISO",
+    ".pdf": "📕 PDF",
+    ".txt": "📄 TXT",
+    ".doc": "📘 DOC",
+    ".docx": "📘 DOCX",
+    ".xls": "📊 XLS",
+    ".xlsx": "📊 XLSX",
+    ".torrent": "🧲 TORR",
+    ".json": "⚙️ JSON",
+    ".yaml": "⚙️ YAML",
+    ".yml": "⚙️ YML",
+    ".sh": "⚡ SH",
+    ".py": "🐍 PY",
+}
+
 
 def format_timestamp(ts: Optional[int | float | str]) -> str:
     """Преобразует Unix-timestamp в читаемый формат даты и времени.
@@ -25,7 +64,7 @@ def format_timestamp(ts: Optional[int | float | str]) -> str:
         ts: Время в секундах (Unix epoch) или None.
 
     Returns:
-        Отформатированная строка вида 'YYYY-MM-DD HH:MM' или '—'.
+        str: Отформатированная строка вида 'YYYY-MM-DD HH:MM' или '—'.
     """
     if not ts or ts == "—":
         return "—"
@@ -46,7 +85,7 @@ def detect_file_type(name: str, is_dir: bool) -> str:
         is_dir: Флаг, является ли объект директорией.
 
     Returns:
-        Строка с иконкой и категорией/расширением (например, '📁 DIR', '🎬 MKV').
+        str: Строка с иконкой и категорией/расширением.
     """
     if is_dir:
         return "📁 DIR"
@@ -54,57 +93,43 @@ def detect_file_type(name: str, is_dir: bool) -> str:
     ext = PurePosixPath(name).suffix.lower()
     if not ext:
         return "📄 FILE"
+    return FILE_TYPE_ICONS.get(ext, f"📄 {ext[1:].upper()[:4]}")
 
-    type_map = {
-        # Видео
-        ".mkv": "🎬 MKV",
-        ".mp4": "🎬 MP4",
-        ".avi": "🎬 AVI",
-        ".mov": "🎬 MOV",
-        ".wmv": "🎬 WMV",
-        ".m4v": "🎬 M4V",
-        # Музыка
-        ".mp3": "🎵 MP3",
-        ".flac": "🎵 FLAC",
-        ".wav": "🎵 WAV",
-        ".aac": "🎵 AAC",
-        ".ogg": "🎵 OGG",
-        # Картинки
-        ".jpg": "🖼️ JPG",
-        ".jpeg": "🖼️ JPEG",
-        ".png": "🖼️ PNG",
-        ".gif": "🖼️ GIF",
-        ".webp": "🖼️ WEBP",
-        ".svg": "🖼️ SVG",
-        # Архивы / Образы
-        ".zip": "📦 ZIP",
-        ".rar": "📦 RAR",
-        ".7z": "📦 7Z",
-        ".tar": "📦 TAR",
-        ".gz": "📦 GZ",
-        ".iso": "💿 ISO",
-        # Документы
-        ".pdf": "📕 PDF",
-        ".txt": "📄 TXT",
-        ".doc": "📘 DOC",
-        ".docx": "📘 DOCX",
-        ".xls": "📊 XLS",
-        ".xlsx": "📊 XLSX",
-        # Торренты
-        ".torrent": "🧲 TORR",
-        # Конфиги / Скрипты
-        ".json": "⚙️ JSON",
-        ".yaml": "⚙️ YAML",
-        ".yml": "⚙️ YML",
-        ".sh": "⚡ SH",
-        ".py": "🐍 PY",
-    }
 
-    return type_map.get(ext, f"📄 {ext[1:].upper()[:4]}")
+def _file_sort_key(item: dict[str, Any], sort_by: str) -> tuple[int, Any]:
+    """Вычисляет ключ сортировки для элемента File Station.
+
+    Args:
+        item: Словарь метаданных файла или директории.
+        sort_by: Поле сортировки ('name', 'size', 'mtime', 'crtime').
+
+    Returns:
+        tuple[int, Any]: Кортеж приоритета папки и значения поля.
+    """
+    is_dir = 0 if item.get("isdir", True) else 1
+    additional = item.get("additional", {})
+    time_info = additional.get("time", {})
+
+    field = sort_by.lower()
+    if field == "size":
+        val: Any = int(additional.get("size", 0))
+    elif field in ("mtime", "time", "date"):
+        val = int(time_info.get("mtime", 0)) if isinstance(time_info, dict) else 0
+    elif field in ("crtime", "created"):
+        val = int(time_info.get("crtime", 0)) if isinstance(time_info, dict) else 0
+    else:
+        val = str(item.get("name", "")).lower()
+
+    return is_dir, val
 
 
 def render_system_status(sys_info: dict[str, Any], util: dict[str, Any]) -> None:
-    """Выводит сводную панель состояния Synology NAS."""
+    """Выводит сводную панель состояния Synology NAS.
+
+    Args:
+        sys_info: Данные `SYNO.Core.System`.
+        util: Данные `SYNO.Core.System.Utilization`.
+    """
     model = sys_info.get("model", "Synology NAS")
     dsm_ver = sys_info.get("firmware_ver") or sys_info.get("version_string", "DSM")
     temp = sys_info.get("sys_temp", "—")
@@ -119,7 +144,7 @@ def render_system_status(sys_info: dict[str, Any], util: dict[str, Any]) -> None
     table.add_column("Значение")
 
     table.add_row("Модель устройства:", f"[bold white]{model}[/bold white]")
-    table.add_row("Версия ОС:", dsm_ver)
+    table.add_row("Версия ОС:", str(dsm_ver))
     table.add_row("Время работы (Uptime):", uptime)
     table.add_row("Температура системы:", f"{temp} °C")
     table.add_row("Загрузка CPU:", f"{cpu_load}%")
@@ -145,11 +170,11 @@ def render_storage_disks(storage_data: dict[str, Any]) -> None:
     table.add_column("SMART / Статус")
 
     for disk in storage_data.get("disks", []):
-        name = disk.get("name", disk.get("id", "—"))
-        model = disk.get("model", "—").strip()
+        name = str(disk.get("name", disk.get("id", "—")))
+        model = str(disk.get("model", "—")).strip()
         size_b = int(disk.get("size_total", 0))
         temp = disk.get("temp", "—")
-        status = disk.get("status", "normal")
+        status = str(disk.get("status", "normal"))
         table.add_row(
             name,
             model,
@@ -174,12 +199,12 @@ def render_docker_containers(containers: list[dict[str, Any]]) -> None:
     table.add_column("CPU %", justify="right")
     table.add_column("Память", justify="right")
 
-    for c in containers:
-        name = c.get("name", "—")
-        image = c.get("image", "—")
-        status = c.get("status", "unknown")
-        cpu = f"{c.get('cpu_priority', 0)}%"
-        mem = format_bytes(int(c.get("memory", 0)))
+    for item in containers:
+        name = str(item.get("name", "—"))
+        image = str(item.get("image", "—"))
+        status = str(item.get("status", "unknown"))
+        cpu = f"{item.get('cpu_priority', 0)}%"
+        mem = format_bytes(int(item.get("memory", 0)))
         table.add_row(name, image, colorize_status(status), cpu, mem)
 
     console.print(table)
@@ -198,7 +223,7 @@ def render_docker_images(images: list[dict[str, Any]]) -> None:
     table.add_column("Размер", justify="right")
 
     for img in images:
-        repo = img.get("repository", "—")
+        repo = str(img.get("repository", "—"))
         tags = ", ".join(img.get("tags", ["latest"]))
         size = format_bytes(int(img.get("size", 0)))
         table.add_row(repo, tags, size)
@@ -220,20 +245,17 @@ def render_vmm_guests(guests: list[dict[str, Any]]) -> None:
     table.add_column("vCPU", justify="right")
     table.add_column("RAM", justify="right")
 
-    for g in guests:
-        name = g.get("guest_name", "—")
-        gid = g.get("guest_id", "—")
-        status = g.get("status", "unknown")
-        vcpu = str(g.get("vcpu_num", "—"))
-        vram_mb = int(g.get("vram_size", 0))
-        table.add_row(
-            name,
-            gid,
-            colorize_status(status),
-            vcpu,
-            f"{vram_mb} MB",
-        )
+    for guest in guests:
+        name = str(guest.get("guest_name", "—"))
+        gid = str(guest.get("guest_id", "—"))
+        status = str(guest.get("status", "unknown"))
+        vcpu = str(guest.get("vcpu_num", "—"))
+        vram_mb = int(guest.get("vram_size", 0))
+        table.add_row(name, gid, colorize_status(status), vcpu, f"{vram_mb} MB")
     console.print(table)
+
+
+render_vms = render_vmm_guests
 
 
 def render_files(
@@ -250,27 +272,7 @@ def render_files(
         sort_by: Поле сортировки ('name', 'size', 'mtime', 'crtime').
         reverse: Инвертировать порядок сортировки (по убыванию).
     """
-
-    def _sort_key(item: dict[str, Any]) -> tuple[int, Any]:
-        is_dir = 0 if item.get("isdir", True) else 1
-        additional = item.get("additional", {})
-        time_info = additional.get("time", {})
-
-        field = sort_by.lower()
-        val: Any
-        if field == "size":
-            val = int(additional.get("size", 0))
-        elif field in ("mtime", "time", "date"):
-            val = int(time_info.get("mtime", 0)) if isinstance(time_info, dict) else 0
-        elif field in ("crtime", "created"):
-            val = int(time_info.get("crtime", 0)) if isinstance(time_info, dict) else 0
-        else:
-            val = str(item.get("name", "")).lower()
-
-        return (is_dir, val)
-
-    sorted_items = sorted(items, key=_sort_key, reverse=reverse)
-
+    sorted_items = sorted(items, key=lambda x: _file_sort_key(x, sort_by), reverse=reverse)
     if not sorted_items:
         console.print(f"[dim]📁 Каталог '{current_path}' пуст.[/dim]")
         return
@@ -285,10 +287,9 @@ def render_files(
     table.add_column("Путь", style="dim")
 
     for item in sorted_items:
-        is_dir = item.get("isdir", True)
-        name = item.get("name", "—")
-        icon_type = detect_file_type(name, is_dir)
-        path = item.get("path", "—")
+        is_dir = bool(item.get("isdir", True))
+        name = str(item.get("name", "—"))
+        path = str(item.get("path", "—"))
 
         additional = item.get("additional", {})
         size = int(additional.get("size", 0))
@@ -299,7 +300,7 @@ def render_files(
         crtime = time_info.get("crtime") if isinstance(time_info, dict) else None
 
         table.add_row(
-            icon_type,
+            detect_file_type(name, is_dir),
             name,
             size_str,
             format_timestamp(mtime),
@@ -310,8 +311,16 @@ def render_files(
     console.print(table)
 
 
-def render_downloads(tasks: list[dict[str, Any]], stats: dict[str, Any] | None = None) -> None:
-    """Выводит сводку скоростей, директорию сохранения и таблицу активных задач в Download Station."""
+def render_downloads(
+    tasks: list[dict[str, Any]], stats: Optional[dict[str, Any]] = None
+) -> None:
+    """
+    Выводит сводку скоростей и таблицу активных задач в Download Station.
+
+    Args:
+        tasks: Список задач скачивания.
+        stats: Словарь общей статистики скоростей.
+    """
     if stats:
         dl_speed = format_speed(int(stats.get("speed_download", 0)))
         ul_speed = format_speed(int(stats.get("speed_upload", 0)))
@@ -334,16 +343,14 @@ def render_downloads(tasks: list[dict[str, Any]], stats: dict[str, Any] | None =
     table.add_column("Прогресс", justify="right")
     table.add_column("Скорость ⬇", justify="right")
 
-    for t in tasks:
-        tid = t.get("id", "—")
-        title = t.get("title", "—")
-        status = t.get("status", "unknown")
-        size = int(t.get("size", 0))
+    for task in tasks:
+        tid = str(task.get("id", "—"))
+        title = str(task.get("title", "—"))
+        status = str(task.get("status", "unknown"))
+        size = int(task.get("size", 0))
 
-        additional = t.get("additional", {})
-        detail = additional.get("detail", {})
-        destination = detail.get("destination", "—")
-
+        additional = task.get("additional", {})
+        destination = str(additional.get("detail", {}).get("destination", "—"))
         transfer = additional.get("transfer", {})
         downloaded = int(transfer.get("size_downloaded", 0))
         speed_dl = int(transfer.get("speed_download", 0))
@@ -362,7 +369,12 @@ def render_downloads(tasks: list[dict[str, Any]], stats: dict[str, Any] | None =
 
 
 def render_docker_stats(stats: list[dict[str, Any]]) -> None:
-    """Отрисовывает таблицу утилизации ресурсов Docker-контейнерами в реальном времени."""
+    """
+    Отрисовывает таблицу утилизации ресурсов Docker-контейнерами в реальном времени.
+
+    Args:
+        stats: Список метрик контейнеров.
+    """
     if not stats:
         console.print("[dim]Нет активных метрик контейнеров Docker.[/dim]")
         return
@@ -375,7 +387,7 @@ def render_docker_stats(stats: list[dict[str, Any]]) -> None:
     table.add_column("Диск I/O (R / W)", justify="right")
 
     for item in stats:
-        name = item.get("name", item.get("container_name", "—"))
+        name = str(item.get("name", item.get("container_name", "—")))
         cpu = item.get("cpu", item.get("cpu_percent", 0.0))
         cpu_str = f"{cpu:.2f}%" if isinstance(cpu, (int, float)) else str(cpu)
 
@@ -386,23 +398,21 @@ def render_docker_stats(stats: list[dict[str, Any]]) -> None:
 
         rx = format_bytes(int(item.get("network_rx_bytes", item.get("net_rx", 0))))
         tx = format_bytes(int(item.get("network_tx_bytes", item.get("net_tx", 0))))
-
         r_io = format_bytes(int(item.get("io_read_bytes", item.get("io_read", 0))))
         w_io = format_bytes(int(item.get("io_write_bytes", item.get("io_write", 0))))
 
-        table.add_row(
-            name,
-            cpu_str,
-            mem_str,
-            f"{rx} / {tx}",
-            f"{r_io} / {w_io}",
-        )
+        table.add_row(name, cpu_str, mem_str, f"{rx} / {tx}", f"{r_io} / {w_io}")
 
     console.print(table)
 
 
 def render_docker_logs(logs: list[str]) -> None:
-    """Отображает строки журнала событий Docker-контейнера."""
+    """
+    Отображает строки журнала событий Docker-контейнера.
+
+    Args:
+        logs: Список отформатированных строк журнала.
+    """
     if not logs:
         console.print("[dim]Логи контейнера пусты.[/dim]")
         return
@@ -411,7 +421,12 @@ def render_docker_logs(logs: list[str]) -> None:
 
 
 def render_docker_projects(projects: list[dict[str, Any]]) -> None:
-    """Отрисовывает таблицу проектов Docker Compose."""
+    """
+    Отрисовывает таблицу проектов Docker Compose.
+
+    Args:
+        projects: Список проектов из `SYNO.Docker.Project`.
+    """
     if not projects:
         console.print("[dim]Нет созданных проектов Docker Compose.[/dim]")
         return
@@ -423,7 +438,7 @@ def render_docker_projects(projects: list[dict[str, Any]]) -> None:
     table.add_column("Путь / Папка", style="cyan")
 
     for proj in projects:
-        name = proj.get("name", "—")
+        name = str(proj.get("name", "—"))
         status_raw = str(proj.get("status", "")).lower()
         if status_raw in ("running", "active", "up"):
             status = "[bold green]Запущен[/bold green]"
@@ -433,15 +448,19 @@ def render_docker_projects(projects: list[dict[str, Any]]) -> None:
             status = f"[yellow]{status_raw or '—'}[/yellow]"
 
         services_count = len(proj.get("services", proj.get("containers", [])))
-        path_str = proj.get("path", proj.get("share_path", "—"))
-
-        table.add_row(name, status, str(services_count), str(path_str))
+        path_str = str(proj.get("path", proj.get("share_path", "—")))
+        table.add_row(name, status, str(services_count), path_str)
 
     console.print(table)
 
 
 def render_system_logs(logs: list[dict[str, Any]]) -> None:
-    """Отображает таблицу системного журнала событий DSM."""
+    """
+    Отображает таблицу системного журнала событий DSM.
+
+    Args:
+        logs: Список записей системного журнала.
+    """
     if not logs:
         console.print("[dim]Записей в системном журнале не найдено.[/dim]")
         return
@@ -465,14 +484,18 @@ def render_system_logs(logs: list[dict[str, Any]]) -> None:
 
         user = str(item.get("user", item.get("who", "SYSTEM")))
         desc = str(item.get("descr", item.get("msg", item.get("text", "—")))).strip()
-
         table.add_row(time_str, level_fmt, user, desc)
 
     console.print(table)
 
 
 def render_vmm_images(images: list[dict[str, Any]]) -> None:
-    """Выводит таблицу образов и шаблонов дисков в Synology VMM."""
+    """
+    Выводит таблицу образов и шаблонов дисков в Synology VMM.
+
+    Args:
+        images: Список образов VMM.
+    """
     if not images:
         console.print("[dim]В репозитории VMM нет зарегистрированных образов.[/dim]")
         return
@@ -485,8 +508,8 @@ def render_vmm_images(images: list[dict[str, Any]]) -> None:
     table.add_column("Размер", justify="right")
 
     for img in images:
-        name = img.get("image_name", img.get("name", "—"))
-        img_id = img.get("image_id", img.get("id", "—"))
+        name = str(img.get("image_name", img.get("name", "—")))
+        img_id = str(img.get("image_id", img.get("id", "—")))
         img_type = str(img.get("type", "iso")).upper()
         status = colorize_status(str(img.get("status", "ready")))
         size = format_bytes(int(img.get("size", 0)))

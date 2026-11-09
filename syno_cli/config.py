@@ -6,6 +6,8 @@ from typing import Literal, Optional
 from platformdirs import user_cache_dir, user_config_dir
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from syno_cli.constants import DEFAULT_HTTPS_PORT
+
 APP_NAME: str = "syno-cli"
 
 USER_CONFIG_DIR: Path = Path(user_config_dir(APP_NAME))
@@ -40,7 +42,7 @@ class SynoSettings(BaseSettings):
     """
 
     host: str = "192.168.1.100"
-    port: int = 5001
+    port: int = DEFAULT_HTTPS_PORT
     user: str = ""
     password: str = ""
     secure: bool = True

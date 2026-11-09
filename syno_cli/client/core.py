@@ -31,9 +31,17 @@ class SynoCoreClient:
         """
         return await self.base.request("SYNO.Core.System", "info", version=1)
 
-    async def get_utilization(self) -> dict[str, Any]:
+    async def get_system_status(self) -> dict[str, Any]:
         """
-        Получает текущие показатели загрузки CPU, использования памяти и сети.
+        Алиас для получения общей информации об устройстве (для обратной совместимости SDK).
+
+        Returns:
+            dict[str, Any]: Словарь с системными характеристиками NAS.
+        """
+        return await self.get_system_info()
+
+    async def get_utilization(self) -> dict[str, Any]:
+        """Получает текущие показатели загрузки CPU, использования памяти и сети.
 
         Returns:
             dict[str, Any]: Метрики утилизации ресурсов (`cpu`, `memory`, `network`).
@@ -41,8 +49,7 @@ class SynoCoreClient:
         return await self.base.request("SYNO.Core.System.Utilization", "get", version=1)
 
     async def get_storage_info(self) -> dict[str, Any]:
-        """
-        Запрашивает состояние дисковой подсистемы: томов, пулов хранения и физических дисков.
+        """Запрашивает состояние дисковой подсистемы: томов, пулов хранения и физических дисков.
 
         Returns:
             dict[str, Any]: Структура с полями `disks`, `storagePools` и `volumes`.

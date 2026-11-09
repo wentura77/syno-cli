@@ -3,6 +3,7 @@
 from typing import Any, Optional
 
 from syno_cli.client.base import BaseSynoClient
+from syno_cli.constants import DEFAULT_LOG_LINES
 
 
 class SynoLogsClient:
@@ -19,14 +20,14 @@ class SynoLogsClient:
     async def list_logs(
         self,
         level: Optional[str] = None,
-        limit: int = 50,
+        limit: int = DEFAULT_LOG_LINES,
         offset: int = 0,
         keyword: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """Запрашивает системные логи DSM.
 
         Args:
-            level: Фильтр критичности (info, warn, err).
+            level: Фильтр критичности (`info`, `warn`, `err`).
             limit: Количество записей.
             offset: Смещение выборки.
             keyword: Ключевое слово для поиска.
@@ -34,16 +35,12 @@ class SynoLogsClient:
         Returns:
             list[dict[str, Any]]: Список записей системного журнала.
         """
-        params: dict[str, Any] = {
-            "limit": limit,
-            "offset": offset,
-        }
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
         if level:
             params["level"] = level
         if keyword:
             params["keyword"] = keyword
 
-        # 1. Пробуем основной интерфейс SYNO.Core.SyslogClient.Log
         try:
             data = await self.base.request(
                 "SYNO.Core.SyslogClient.Log",
@@ -57,7 +54,6 @@ class SynoLogsClient:
         except Exception:
             pass
 
-        # 2. Fallback: SYNO.Core.SyslogClient.Setting.Log (DSM 7.x)
         data = await self.base.request(
             "SYNO.Core.SyslogClient.Setting.Log",
             "list",

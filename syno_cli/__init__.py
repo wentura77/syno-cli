@@ -8,7 +8,8 @@ from syno_cli.client.file_station import SynoFileStationClient
 from syno_cli.client.logs import SynoLogsClient
 from syno_cli.client.vmm import SynoVmmClient
 from syno_cli.config import SynoSettings, settings
-from syno_cli.exceptions import DsmApiError, DsmAuthError
+from syno_cli.constants import ExitCode
+from syno_cli.exceptions import DsmApiError, DsmAuthError, DsmTaskNotFoundError
 from syno_cli.facade import SynoDSM
 
 __all__ = [
@@ -22,6 +23,8 @@ __all__ = [
     "SynoVmmClient",
     "SynoSettings",
     "settings",
+    "ExitCode",
     "DsmApiError",
     "DsmAuthError",
+    "DsmTaskNotFoundError",
 ]

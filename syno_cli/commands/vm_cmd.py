@@ -1,12 +1,16 @@
 """CLI-команды управления Virtual Machine Manager (VMM) в Synology DSM."""
 
-from typing import Any, Optional, Tuple
+from typing import Optional
 
 import typer
 
-from syno_cli.client.base import BaseSynoClient
-from syno_cli.client.vmm import SynoVmmClient
-from syno_cli.commands.common import cli_command, console
+from syno_cli.commands.common import CommandResult, cli_command, console
+from syno_cli.constants import (
+    DEFAULT_VMM_CPU_WEIGHT,
+    DEFAULT_VMM_DISK_GB,
+    DEFAULT_VMM_RAM_MB,
+)
+from syno_cli.facade import SynoDSM
 from syno_cli.views.tables import render_vmm_guests, render_vmm_images
 
 vm_app = typer.Typer(help="Управление виртуальными машинами, ISO-образами и снимками VMM.")
@@ -16,44 +20,38 @@ vm_app = typer.Typer(help="Управление виртуальными маш�
 @cli_command(spinner_message="Запрос списка виртуальных машин...")
 async def vm_list(
     json_output: bool = typer.Option(False, "--json", "-j", help="Вывод в формате JSON"),
-) -> Tuple[Any, Any]:
+) -> CommandResult:
     """Вывести список всех виртуальных машин в кластере VMM и их статусы.
 
     Args:
         json_output: Флаг сериализации результата в формат JSON.
 
     Returns:
-        Tuple[Any, Any]: Кортеж из списка виртуальных машин и функции рендеринга таблицы.
+        CommandResult: Кортеж из списка виртуальных машин и функции рендеринга таблицы.
     """
-    base = BaseSynoClient()
-    try:
-        vmm = SynoVmmClient(base)
-        guests = await vmm.list_guests()
+    _ = json_output
+    async with SynoDSM() as nas:
+        guests = await nas.vmm.list_guests()
         return guests, render_vmm_guests
-    finally:
-        await base.close()
 
 
 @vm_app.command("images")
 @cli_command(spinner_message="Запрос образов VMM...")
 async def vm_images(
     json_output: bool = typer.Option(False, "--json", "-j", help="Вывод в формате JSON"),
-) -> Tuple[Any, Any]:
+) -> CommandResult:
     """Вывести список зарегистрированных ISO-образов и шаблонов дисков в VMM.
 
     Args:
         json_output: Флаг сериализации результата в формат JSON.
 
     Returns:
-        Tuple[Any, Any]: Кортеж из списка образов и функции рендеринга таблицы.
+        CommandResult: Кортеж из списка образов и функции рендеринга таблицы.
     """
-    base = BaseSynoClient()
-    try:
-        vmm = SynoVmmClient(base)
-        images = await vmm.list_images()
+    _ = json_output
+    async with SynoDSM() as nas:
+        images = await nas.vmm.list_images()
         return images, render_vmm_images
-    finally:
-        await base.close()
 
 
 @vm_app.command("image-import")
@@ -66,7 +64,7 @@ async def vm_image_import(
     image_type: str = typer.Option("iso", "--type", "-t", help="Тип образа (iso, vdisk, ova)"),
     storage: Optional[list[str]] = typer.Option(None, "--storage", "-s", help="Имя хранилища VMM"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Вывод в формате JSON"),
-) -> Tuple[Any, Any]:
+) -> CommandResult:
     """Импортировать установочный ISO-образ или файл диска в репозиторий VMM.
 
     Args:
@@ -77,12 +75,11 @@ async def vm_image_import(
         json_output: Флаг сериализации результата в формат JSON.
 
     Returns:
-        Tuple[Any, Any]: Кортеж из ответа DSM и колбэка подтверждения создания.
+        CommandResult: Кортеж из ответа DSM и колбэка подтверждения создания.
     """
-    base = BaseSynoClient()
-    try:
-        vmm = SynoVmmClient(base)
-        result = await vmm.import_image(
+    _ = json_output
+    async with SynoDSM() as nas:
+        result = await nas.vmm.import_image(
             image_name=name,
             ds_file_path=path,
             image_type=image_type,
@@ -94,8 +91,6 @@ async def vm_image_import(
                 f"[bold green]✓ Образ '{name}' успешно зарегистрирован в VMM[/bold green]"
             ),
         )
-    finally:
-        await base.close()
 
 
 @vm_app.command("create")
@@ -103,9 +98,11 @@ async def vm_image_import(
 async def vm_create(
     name: str = typer.Option(..., "--name", "-n", help="Имя виртуальной машины"),
     cpu: int = typer.Option(1, "--cpu", "-c", help="Количество vCPU ядер"),
-    memory: int = typer.Option(1024, "--memory", "-m", help="Объем памяти RAM (МБ)"),
+    memory: int = typer.Option(DEFAULT_VMM_RAM_MB, "--memory", "-m", help="Объем памяти RAM (МБ)"),
     storage: Optional[str] = typer.Option(None, "--storage", "-s", help="Хранилище VMM (Repo)"),
-    disk: int = typer.Option(20, "--disk", "-d", help="Размер системного диска (ГБ)"),
+    disk: int = typer.Option(
+        DEFAULT_VMM_DISK_GB, "--disk", "-d", help="Размер системного диска (ГБ)"
+    ),
     iso: Optional[str] = typer.Option(None, "--iso", help="Путь или имя ISO-образа"),
     start: bool = typer.Option(False, "--start", help="Запустить ВМ сразу после создания"),
     autorun: bool = typer.Option(False, "--autorun", help="Автозапуск ВМ при включении NAS"),
@@ -124,12 +121,14 @@ async def vm_create(
         help="Проброс инструкций хост-процессора",
     ),
     hyperv: bool = typer.Option(True, "--hyperv/--no-hyperv", help="Включение оптимизаций Hyper-V"),
-    cpu_weight: int = typer.Option(256, "--cpu-weight", help="Приоритет процессорного времени"),
+    cpu_weight: int = typer.Option(
+        DEFAULT_VMM_CPU_WEIGHT, "--cpu-weight", help="Приоритет процессорного времени"
+    ),
     cpu_pin: int = typer.Option(
         0, "--cpu-pin", help="Привязка к физическим ядрам CPU (0 — выключено)"
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Вывод в формате JSON"),
-) -> Tuple[Any, Any]:
+) -> CommandResult:
     """Создает виртуальную машину в Virtual Machine Manager с расширенной конфигурацией.
 
     Args:
@@ -153,12 +152,11 @@ async def vm_create(
         json_output: Вывести ли результат в виде неформатированного JSON.
 
     Returns:
-        Tuple[Any, Any]: Кортеж из словаря ответа DSM и колбэка форматированного вывода.
+        CommandResult: Кортеж из словаря ответа DSM и колбэка форматированного вывода.
     """
-    base = BaseSynoClient()
-    try:
-        vmm = SynoVmmClient(base)
-        result = await vmm.create_guest(
+    _ = json_output
+    async with SynoDSM() as nas:
+        result = await nas.vmm.create_guest(
             name=name,
             vcpu_num=cpu,
             vram_size_mb=memory,
@@ -183,8 +181,6 @@ async def vm_create(
                 f"[bold green]✓ Виртуальная машина '{name}' успешно создана[/bold green]"
             ),
         )
-    finally:
-        await base.close()
 
 
 @vm_app.command("start")
@@ -192,7 +188,7 @@ async def vm_create(
 async def vm_start(
     name: str = typer.Argument(..., help="Имя виртуальной машины"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Вывод в формате JSON"),
-) -> Tuple[Any, Any]:
+) -> CommandResult:
     """Запустить виртуальную машину (poweron).
 
     Args:
@@ -200,19 +196,17 @@ async def vm_start(
         json_output: Флаг вывода в JSON.
 
     Returns:
-        Tuple[Any, Any]: Результат операции и функция вывода сообщения.
+        CommandResult: Результат операции и функция вывода сообщения.
     """
-    base = BaseSynoClient()
-    try:
-        result = await SynoVmmClient(base).guest_power_action(name, "poweron")
+    _ = json_output
+    async with SynoDSM() as nas:
+        result = await nas.vmm.guest_power_action(name, "poweron")
         return (
             result,
             lambda _: console.print(
                 f"[bold green]✓ Виртуальная машина '{name}' запущена[/bold green]"
             ),
         )
-    finally:
-        await base.close()
 
 
 @vm_app.command("stop")
@@ -223,7 +217,7 @@ async def vm_stop(
         False, "--force", "-f", help="Принудительное выключение по питанию (poweroff)"
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Вывод в формате JSON"),
-) -> Tuple[Any, Any]:
+) -> CommandResult:
     """Остановить виртуальную машину штатно (shutdown) или принудительно (poweroff).
 
     Args:
@@ -232,20 +226,18 @@ async def vm_stop(
         json_output: Флаг вывода в JSON.
 
     Returns:
-        Tuple[Any, Any]: Результат операции и функция вывода сообщения.
+        CommandResult: Результат операции и функция вывода сообщения.
     """
+    _ = json_output
     action = "poweroff" if force else "shutdown"
-    base = BaseSynoClient()
-    try:
-        result = await SynoVmmClient(base).guest_power_action(name, action)
+    async with SynoDSM() as nas:
+        result = await nas.vmm.guest_power_action(name, action)
         return (
             result,
             lambda _: console.print(
                 f"[bold yellow]✓ Виртуальная машина '{name}' остановлена ({action})[/bold yellow]"
             ),
         )
-    finally:
-        await base.close()
 
 
 @vm_app.command("restart")
@@ -253,7 +245,7 @@ async def vm_stop(
 async def vm_restart(
     name: str = typer.Argument(..., help="Имя виртуальной машины"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Вывод в формате JSON"),
-) -> Tuple[Any, Any]:
+) -> CommandResult:
     """Перезапустить виртуальную машину (restart).
 
     Args:
@@ -261,19 +253,17 @@ async def vm_restart(
         json_output: Флаг вывода в JSON.
 
     Returns:
-        Tuple[Any, Any]: Результат операции и функция вывода сообщения.
+        CommandResult: Результат операции и функция вывода сообщения.
     """
-    base = BaseSynoClient()
-    try:
-        result = await SynoVmmClient(base).guest_power_action(name, "restart")
+    _ = json_output
+    async with SynoDSM() as nas:
+        result = await nas.vmm.guest_power_action(name, "restart")
         return (
             result,
             lambda _: console.print(
                 f"[bold green]✓ Виртуальная машина '{name}' перезапущена[/bold green]"
             ),
         )
-    finally:
-        await base.close()
 
 
 @vm_app.command("snapshot")
@@ -282,7 +272,7 @@ async def vm_snapshot(
     name: str = typer.Argument(..., help="Имя виртуальной машины"),
     desc: str = typer.Option("", "--desc", "-d", help="Описание или примечание к снимку"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Вывод в формате JSON"),
-) -> Tuple[Any, Any]:
+) -> CommandResult:
     """Создать моментальный снимок (snapshot) состояния виртуальной машины.
 
     Args:
@@ -291,16 +281,14 @@ async def vm_snapshot(
         json_output: Флаг вывода в JSON.
 
     Returns:
-        Tuple[Any, Any]: Результат операции и функция вывода сообщения.
+        CommandResult: Результат операции и функция вывода сообщения.
     """
-    base = BaseSynoClient()
-    try:
-        result = await SynoVmmClient(base).create_snapshot(name, description=desc)
+    _ = json_output
+    async with SynoDSM() as nas:
+        result = await nas.vmm.create_snapshot(name, description=desc)
         return (
             result,
             lambda _: console.print(
                 f"[bold green]✓ Снимок для '{name}' успешно создан[/bold green]"
             ),
         )
-    finally:
-        await base.close()

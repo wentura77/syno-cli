@@ -10,16 +10,17 @@
 import json
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Final, Optional
 
 import keyring
 
-from syno_cli.session_storage import get_host_cipher
+from syno_cli.constants import SECURE_FILE_PERMISSIONS
+from syno_cli.session_storage import get_host_cipher, is_keyring_available
 
 logger = logging.getLogger(__name__)
 
-KEYRING_AUTH_SERVICE: str = "syno_cli_auth"
-KEYRING_AUTH_ACCOUNT: str = "dsm_credentials"
+KEYRING_AUTH_SERVICE: Final[str] = "syno_cli_auth"
+KEYRING_AUTH_ACCOUNT: Final[str] = "dsm_credentials"
 
 
 def save_credentials_to_file(username: str, password: str, file_path: Path) -> None:
@@ -35,7 +36,7 @@ def save_credentials_to_file(username: str, password: str, file_path: Path) -> N
     payload = json.dumps({"user": username, "password": password})
     encrypted = cipher.encrypt(payload.encode("utf-8")).decode("utf-8")
     file_path.write_text(encrypted, encoding="utf-8")
-    file_path.chmod(0o600)
+    file_path.chmod(SECURE_FILE_PERMISSIONS)
 
 
 def load_credentials_from_file(file_path: Path) -> Optional[tuple[str, str]]:
@@ -53,8 +54,7 @@ def load_credentials_from_file(file_path: Path) -> Optional[tuple[str, str]]:
         content = file_path.read_text(encoding="utf-8").strip()
         if not content:
             return None
-        cipher = get_host_cipher()
-        decrypted = cipher.decrypt(content.encode("utf-8")).decode("utf-8")
+        decrypted = get_host_cipher().decrypt(content.encode("utf-8")).decode("utf-8")
         parsed = json.loads(decrypted)
         if isinstance(parsed, dict):
             return str(parsed.get("user", "")), str(parsed.get("password", ""))
@@ -82,10 +82,11 @@ def load_credentials_from_keyring() -> Optional[tuple[str, str]]:
     """
     try:
         raw = keyring.get_password(KEYRING_AUTH_SERVICE, KEYRING_AUTH_ACCOUNT)
-        if raw:
-            parsed = json.loads(raw)
-            if isinstance(parsed, dict):
-                return str(parsed.get("user", "")), str(parsed.get("password", ""))
+        if not raw:
+            return None
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return str(parsed.get("user", "")), str(parsed.get("password", ""))
     except Exception as exc:
         logger.debug("Ошибка чтения учетных данных из keyring: %s", exc)
     return None
@@ -102,11 +103,10 @@ def clear_stored_credentials(file_path: Path) -> None:
     except Exception:
         pass
 
-    if file_path.exists():
-        try:
-            file_path.unlink()
-        except Exception:
-            pass
+    try:
+        file_path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def get_credentials(backend: str, file_path: Path) -> Optional[tuple[str, str]]:
@@ -119,19 +119,15 @@ def get_credentials(backend: str, file_path: Path) -> Optional[tuple[str, str]]:
     Returns:
         Optional[tuple[str, str]]: Кортеж `(username, password)` или `None`.
     """
-    b = backend.strip().lower()
-    if b == "keyring":
+    mode = backend.strip().lower()
+    if mode == "keyring":
         return load_credentials_from_keyring()
-    if b == "file":
+    if mode == "file":
         return load_credentials_from_file(file_path)
 
-    try:
-        kr = keyring.get_keyring()
-        if "fail" not in kr.__class__.__name__.lower():
-            creds = load_credentials_from_keyring()
-            if creds and creds[1]:
-                return creds
-    except Exception:
-        pass
+    if is_keyring_available():
+        creds = load_credentials_from_keyring()
+        if creds and creds[1]:
+            return creds
 
     return load_credentials_from_file(file_path)

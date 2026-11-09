@@ -3,6 +3,84 @@
 from typing import Any, Optional
 
 from syno_cli.client.base import BaseSynoClient
+from syno_cli.constants import DEFAULT_DOCKER_LOG_TAIL
+
+
+def _parse_port_bindings(ports: list[str]) -> list[dict[str, Any]]:
+    """Преобразует список строк `HOST:CONTAINER` в формат привязки портов DSM Docker.
+
+    Args:
+        ports: Список строк вида `["8080:80"]`.
+
+    Returns:
+        list[dict[str, Any]]: Список словарей конфигурации портов.
+    """
+    bindings: list[dict[str, Any]] = []
+    for item in ports:
+        parts = item.split(":")
+        if len(parts) == 2:
+            bindings.append(
+                {
+                    "host_port": int(parts[0]),
+                    "container_port": int(parts[1]),
+                    "protocol": "tcp",
+                }
+            )
+    return bindings
+
+
+def _parse_volume_bindings(volumes: list[str]) -> list[dict[str, str]]:
+    """Преобразует список строк `/host:/container` в формат монтирования томов DSM.
+
+    Args:
+        volumes: Список строк монтирования.
+
+    Returns:
+        list[dict[str, str]]: Список словарей конфигурации томов.
+    """
+    binds: list[dict[str, str]] = []
+    for item in volumes:
+        parts = item.split(":")
+        if len(parts) == 2:
+            binds.append(
+                {
+                    "host_volume_file": parts[0],
+                    "mount_point": parts[1],
+                    "type": "bind",
+                }
+            )
+    return binds
+
+
+def _parse_env_variables(env_vars: list[str]) -> list[dict[str, str]]:
+    """Преобразует список строк `KEY=VALUE` в список словарей переменных окружения.
+
+    Args:
+        env_vars: Список строк переменных окружения.
+
+    Returns:
+        list[dict[str, str]]: Список словарей `{"key": ..., "value": ...}`.
+    """
+    return [
+        {"key": item.split("=", 1)[0], "value": item.split("=", 1)[1] if "=" in item else ""}
+        for item in env_vars
+    ]
+
+
+def _format_log_entry(item: Any) -> str:
+    """Форматирует одну запись лога Docker или Compose в строку `[stream] text`.
+
+    Args:
+        item: Запись лога (словарь или строка).
+
+    Returns:
+        str: Отформатированная строка лога.
+    """
+    if not isinstance(item, dict):
+        return str(item).strip()
+    text = str(item.get("text") or item.get("log") or item.get("msg") or "").strip()
+    stream_type = str(item.get("stream") or "stdout")
+    return f"[{stream_type}] {text}"
 
 
 class SynoDockerClient:
@@ -132,20 +210,24 @@ class SynoDockerClient:
             "name": f'"{clean_name}"',
             "force": "true" if force else "false",
         }
-        data = await self.base.request(
+        return await self.base.request(
             "SYNO.Docker.Container",
             "delete",
             version=1,
             params=params,
             http_method="POST",
         )
-        return data if isinstance(data, dict) else {}
 
     async def get_container_stats(self, name: Optional[str] = None) -> list[dict[str, Any]]:
-        """Запрашивает статистику утилизации ресурсов (CPU, RAM, сеть, диск) контейнерами."""
-        params: dict[str, Any] = {}
-        if name:
-            params["name"] = name
+        """Запрашивает статистику утилизации ресурсов (CPU, RAM, сеть, диск) контейнерами.
+
+        Args:
+            name: Опциональное имя конкретного контейнера.
+
+        Returns:
+            list[dict[str, Any]]: Список метрик контейнеров.
+        """
+        params: dict[str, Any] = {"name": name} if name else {}
         data = await self.base.request(
             "SYNO.Docker.Container.Resource",
             "get",
@@ -157,10 +239,17 @@ class SynoDockerClient:
             return [{"name": name or "unknown", **stats}]
         return list(stats) if isinstance(stats, list) else []
 
-    async def get_container_logs(self, name: str, tail: int = 100) -> list[str]:
+    async def get_container_logs(
+        self, name: str, tail: int = DEFAULT_DOCKER_LOG_TAIL
+    ) -> list[str]:
         """Возвращает последние строки журнала событий (логов) контейнера.
 
-        Использует SYNO.Docker.Container.Log с обязательными параметрами sort_dir и name.
+        Args:
+            name: Имя контейнера.
+            tail: Количество последних строк.
+
+        Returns:
+            list[str]: Список отформатированных строк лога в хронологическом порядке.
         """
         clean_name = name.lstrip("/")
         params = {
@@ -180,16 +269,7 @@ class SynoDockerClient:
         logs = data.get("logs", [])
         if not isinstance(logs, list):
             return []
-
-        res: list[str] = []
-        for item in reversed(logs):
-            if isinstance(item, dict):
-                text = str(item.get("text") or item.get("log") or item.get("msg") or "").strip()
-                stream_type = str(item.get("stream") or "stdout")
-                res.append(f"[{stream_type}] {text}")
-            else:
-                res.append(str(item).strip())
-        return res
+        return [_format_log_entry(item) for item in reversed(logs)]
 
     async def create_container(
         self,
@@ -221,50 +301,26 @@ class SynoDockerClient:
         }
 
         if ports:
-            port_bindings = []
-            for p in ports:
-                parts = p.split(":")
-                if len(parts) == 2:
-                    port_bindings.append(
-                        {
-                            "host_port": int(parts[0]),
-                            "container_port": int(parts[1]),
-                            "protocol": "tcp",
-                        }
-                    )
-            container_config["port_bindings"] = port_bindings
-
+            container_config["port_bindings"] = _parse_port_bindings(ports)
         if volumes:
-            binds = []
-            for v in volumes:
-                parts = v.split(":")
-                if len(parts) == 2:
-                    binds.append(
-                        {
-                            "host_volume_file": parts[0],
-                            "mount_point": parts[1],
-                            "type": "bind",
-                        }
-                    )
-            container_config["volume_bindings"] = binds
-
+            container_config["volume_bindings"] = _parse_volume_bindings(volumes)
         if env_vars:
-            container_config["env_variables"] = [
-                {"key": e.split("=", 1)[0], "value": e.split("=", 1)[1] if "=" in e else ""}
-                for e in env_vars
-            ]
+            container_config["env_variables"] = _parse_env_variables(env_vars)
 
-        data = await self.base.request(
+        return await self.base.request(
             "SYNO.Docker.Container",
             "create",
             version=1,
             params=container_config,
             http_method="POST",
         )
-        return data if isinstance(data, dict) else {}
 
     async def list_projects(self) -> list[dict[str, Any]]:
-        """Получает список всех проектов Docker Compose."""
+        """Получает список всех проектов Docker Compose.
+
+        Returns:
+            list[dict[str, Any]]: Список словарей описания проектов.
+        """
         data = await self.base.request(
             "SYNO.Docker.Project",
             "list",
@@ -280,49 +336,77 @@ class SynoDockerClient:
         env_content: Optional[str] = None,
         share_path: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Создает или обновляет и запускает проект Docker Compose (up)."""
-        params: dict[str, Any] = {
-            "name": name,
-            "content": compose_content,
-        }
+        """Создает или обновляет и запускает проект Docker Compose (up).
+
+        Args:
+            name: Имя проекта.
+            compose_content: Текст файла `docker-compose.yml`.
+            env_content: Опциональный текст файла `.env`.
+            share_path: Путь к папке проекта на томе NAS.
+
+        Returns:
+            dict[str, Any]: Ответ сервера.
+        """
+        params: dict[str, Any] = {"name": name, "content": compose_content}
         if env_content:
             params["env_content"] = env_content
         if share_path:
             params["share_path"] = share_path
 
-        data = await self.base.request(
+        return await self.base.request(
             "SYNO.Docker.Project",
             "build",
             version=1,
             params=params,
             http_method="POST",
         )
-        return data if isinstance(data, dict) else {}
 
     async def stop_project(self, name: str) -> dict[str, Any]:
-        """Останавливает проект Docker Compose (down)."""
-        data = await self.base.request(
+        """Останавливает проект Docker Compose (down).
+
+        Args:
+            name: Имя проекта.
+
+        Returns:
+            dict[str, Any]: Ответ сервера.
+        """
+        return await self.base.request(
             "SYNO.Docker.Project",
             "clean",
             version=1,
             params={"name": name},
             http_method="POST",
         )
-        return data if isinstance(data, dict) else {}
 
     async def restart_project(self, name: str) -> dict[str, Any]:
-        """Перезапускает проект Docker Compose."""
-        data = await self.base.request(
+        """Перезапускает проект Docker Compose.
+
+        Args:
+            name: Имя проекта.
+
+        Returns:
+            dict[str, Any]: Ответ сервера.
+        """
+        return await self.base.request(
             "SYNO.Docker.Project",
             "restart",
             version=1,
             params={"name": name},
             http_method="POST",
         )
-        return data if isinstance(data, dict) else {}
 
-    async def get_project_logs(self, name: str, tail: int = 100) -> list[str]:
-        """Получает агрегированные логи проекта Docker Compose."""
+    async def get_project_logs(
+        self, name: str, tail: int = DEFAULT_DOCKER_LOG_TAIL
+    ) -> list[str]:
+        """Получает агрегированные логи проекта Docker Compose.
+
+        Args:
+            name: Имя проекта.
+            tail: Количество последних строк.
+
+        Returns:
+            list[str]: Список строк журнала.
+        """
         data = await self.base.request(
             "SYNO.Docker.Project",
             "get_log",
@@ -330,14 +414,6 @@ class SynoDockerClient:
             params={"name": name, "limit": tail, "offset": 0},
         )
         logs = data.get("logs", [])
-        if isinstance(logs, list):
-            res: list[str] = []
-            for item in logs:
-                if isinstance(item, dict):
-                    msg = str(item.get("log") or item.get("msg") or "").rstrip()
-                    stream_type = str(item.get("stream") or "stdout")
-                    res.append(f"[{stream_type}] {msg}")
-                else:
-                    res.append(str(item).rstrip())
-            return res
-        return []
+        if not isinstance(logs, list):
+            return []
+        return [_format_log_entry(item) for item in logs]

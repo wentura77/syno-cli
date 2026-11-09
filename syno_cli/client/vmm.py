@@ -4,15 +4,49 @@ import json
 from typing import Any, Optional
 
 from syno_cli.client.base import BaseSynoClient
+from syno_cli.constants import (
+    BYTES_IN_KB,
+    DEFAULT_VMM_CPU_WEIGHT,
+    DEFAULT_VMM_DEV_WEIGHT,
+    DEFAULT_VMM_DISK_GB,
+    DEFAULT_VMM_RAM_MB,
+    DEFAULT_VMM_VNIC_VIRTIO,
+)
+
+
+def _match_cluster_item(
+    items: list[dict[str, Any]],
+    query: Optional[str],
+    name_key: str,
+    id_key: str,
+) -> dict[str, Any]:
+    """Находит элемент кластера VMM (Repo или Network) по подстроке имени или точному ID.
+
+    Args:
+        items: Список элементов из API.
+        query: Поисковый запрос (имя или UUID) либо None.
+        name_key: Ключ названия элемента.
+        id_key: Ключ идентификатора элемента.
+
+    Returns:
+        dict[str, Any]: Найденный элемент или первый элемент списка.
+    """
+    if not items:
+        return {}
+    if not query:
+        return items[0]
+
+    q_lower = query.lower()
+    for item in items:
+        item_name = str(item.get(name_key, "")).lower()
+        item_id = str(item.get(id_key, "")).lower()
+        if q_lower in item_name or q_lower == item_id:
+            return item
+    return items[0]
 
 
 class SynoVmmClient:
-    """Клиент для работы с API виртуализации `SYNO.Virtualization.*`.
-
-    Поддерживает получение списка виртуальных машин, управление их питанием,
-    импорт установочных образов (ISO/OVA), создание новых ВМ с расширенной
-    конфигурацией и работу со снапшотами.
-    """
+    """Клиент для работы с API виртуализации `SYNO.Virtualization.*`."""
 
     def __init__(self, base: BaseSynoClient) -> None:
         """Инициализирует клиент Virtual Machine Manager.
@@ -73,7 +107,7 @@ class SynoVmmClient:
                 "SYNO.Virtualization.API.Guest.Action",
                 action,
                 version=1,
-                params={"guest_name": guest_name},
+                params={"guest_name": clean_name},
                 http_method="POST",
             )
 
@@ -140,13 +174,72 @@ class SynoVmmClient:
                 http_method="POST",
             )
 
+    async def _resolve_primary_host(self) -> tuple[str, str]:
+        """Определяет идентификатор и имя основного хоста кластера VMM.
+
+        Returns:
+            tuple[str, str]: Кортеж `(host_id, host_name)`.
+        """
+        try:
+            res = await self.base.request(
+                "SYNO.Virtualization.Host", "list", version=1, http_method="POST"
+            )
+            hosts = res.get("hosts", [])
+            if isinstance(hosts, list) and hosts:
+                return str(hosts[0].get("host_id", "")), str(hosts[0].get("host_name", ""))
+        except Exception:
+            pass
+        return "", ""
+
+    async def _resolve_storage_repo(self, storage_name: Optional[str]) -> tuple[str, str]:
+        """Определяет UUID и имя хранилища VMM (Repo).
+
+        Args:
+            storage_name: Искомое имя или подстрока имени хранилища.
+
+        Returns:
+            tuple[str, str]: Кортеж `(repo_id, repo_name)`.
+        """
+        try:
+            res = await self.base.request(
+                "SYNO.Virtualization.Repo", "list", version=1, http_method="POST"
+            )
+            repos = res.get("repos", [])
+            if isinstance(repos, list) and repos:
+                target = _match_cluster_item(repos, storage_name, "repo_name", "repo_id")
+                return str(target.get("repo_id", "")), str(target.get("repo_name", ""))
+        except Exception:
+            pass
+        return "", storage_name or ""
+
+    async def _resolve_network_id(self, network: Optional[str]) -> str:
+        """Определяет UUID виртуальной сети VMM.
+
+        Args:
+            network: Искомое имя или UUID виртуальной сети.
+
+        Returns:
+            str: Идентификатор `network_id` или пустая строка.
+        """
+        try:
+            res = await self.base.request(
+                "SYNO.Virtualization.Network", "list", version=1, http_method="POST"
+            )
+            networks = res.get("networks", [])
+            if isinstance(networks, list) and networks:
+                target = _match_cluster_item(networks, network, "network_name", "network_id")
+                return str(target.get("network_id", ""))
+        except Exception:
+            pass
+        return ""
+
     async def create_guest(
         self,
         name: str,
         vcpu_num: int = 1,
-        vram_size_mb: int = 1024,
+        vram_size_mb: int = DEFAULT_VMM_RAM_MB,
         storage_name: Optional[str] = None,
-        disk_size_gb: int = 20,
+        disk_size_gb: int = DEFAULT_VMM_DISK_GB,
         iso_image_name: Optional[str] = None,
         auto_start: bool = False,
         autorun: bool = False,
@@ -155,16 +248,13 @@ class SynoVmmClient:
         desc: str = "",
         network: Optional[str] = None,
         mac: Optional[str] = None,
-        vnic_type: int = 1,
+        vnic_type: int = DEFAULT_VMM_VNIC_VIRTIO,
         cpu_passthrough: bool = True,
         hyperv: bool = True,
-        cpu_weight: int = 256,
+        cpu_weight: int = DEFAULT_VMM_CPU_WEIGHT,
         cpu_pin: int = 0,
     ) -> dict[str, Any]:
         """Создает новую виртуальную машину в Synology Virtual Machine Manager.
-
-        Выполняет обращение к API SYNO.Virtualization.Guest, автоматически
-        разрешая идентификаторы кластера (host_id, repo_id, network_id).
 
         Args:
             name: Имя создаваемой виртуальной машины.
@@ -182,77 +272,17 @@ class SynoVmmClient:
             mac: Статический аппаратный MAC-адрес виртуальной сетевой карты.
             vnic_type: Числовой идентификатор модели сетевого адаптера (1 — VirtIO).
             cpu_passthrough: Передавать ли процессорные флаги хоста гостевой ОС.
-            hyperv: Включить ли расширения просвещения Hyper-V для оптимизации производительности.
-            cpu_weight: Относительный вес приоритета планировщика CPU (по умолчанию 256).
+            hyperv: Включить ли расширения просвещения Hyper-V.
+            cpu_weight: Относительный вес приоритета планировщика CPU.
             cpu_pin: Номер или маска привязки к физическим ядрам процессора (0 — отключено).
 
         Returns:
-            dict[str, Any]: Ответ сервера с метаданными созданной виртуальной машины (guest_id).
-
-        Raises:
-            RuntimeError: Если в кластере VMM не обнаружено активных хостов или хранилищ.
+            dict[str, Any]: Ответ сервера с метаданными созданной виртуальной машины.
         """
-        # 1. Получаем список хостов VMM
-        host_id = ""
-        host_name = ""
-        try:
-            hosts_res = await self.base.request(
-                "SYNO.Virtualization.Host", "list", version=1, http_method="POST"
-            )
-            hosts = hosts_res.get("hosts", [])
-            if hosts and isinstance(hosts, list):
-                host = hosts[0]
-                host_id = str(host.get("host_id", ""))
-                host_name = str(host.get("host_name", ""))
-        except Exception:
-            pass
+        host_id, host_name = await self._resolve_primary_host()
+        repo_id, repo_name = await self._resolve_storage_repo(storage_name)
+        net_id = await self._resolve_network_id(network)
 
-        # 2. Получаем список хранилищ VMM (Repo)
-        repo_id = ""
-        repo_name = ""
-        try:
-            repo_res = await self.base.request(
-                "SYNO.Virtualization.Repo", "list", version=1, http_method="POST"
-            )
-            repos = repo_res.get("repos", [])
-            if repos and isinstance(repos, list):
-                target_repo = repos[0]
-                if storage_name:
-                    for r in repos:
-                        r_name = str(r.get("repo_name", "")).lower()
-                        r_id = str(r.get("repo_id", "")).lower()
-                        if storage_name.lower() in r_name or storage_name.lower() == r_id:
-                            target_repo = r
-                            break
-                repo_id = str(target_repo.get("repo_id", ""))
-                repo_name = str(target_repo.get("repo_name", ""))
-        except Exception:
-            pass
-
-        if not repo_name and storage_name:
-            repo_name = storage_name
-
-        # 3. Получаем виртуальную сеть (Network)
-        net_id = ""
-        try:
-            net_res = await self.base.request(
-                "SYNO.Virtualization.Network", "list", version=1, http_method="POST"
-            )
-            networks = net_res.get("networks", [])
-            if networks and isinstance(networks, list):
-                target_net = networks[0]
-                if network:
-                    for n in networks:
-                        n_name = str(n.get("network_name", "")).lower()
-                        n_id = str(n.get("network_id", "")).lower()
-                        if network.lower() in n_name or network.lower() == n_id:
-                            target_net = n
-                            break
-                net_id = str(target_net.get("network_id", ""))
-        except Exception:
-            pass
-
-        # 4. Формируем структуры дисков и интерфейсов
         vdisks_data = [
             {
                 "type": "add",
@@ -263,7 +293,7 @@ class SynoVmmClient:
                 "fua": True,
                 "dev_limit": 0,
                 "dev_reservation": 0,
-                "dev_weight": 3,
+                "dev_weight": DEFAULT_VMM_DEV_WEIGHT,
                 "vdisk_size": disk_size_gb,
                 "idx": 0,
             }
@@ -284,12 +314,11 @@ class SynoVmmClient:
         iso_data = [iso_image_name, "unmounted"] if iso_image_name else ["unmounted", "unmounted"]
         clean_name = name.strip("\"'")
 
-        # 5. Параметры вызова API со строгой строковой сериализацией
         params: dict[str, Any] = {
             "name": f'"{clean_name}"',
             "vcpu_num": str(vcpu_num),
             "vram_size": str(vram_size_mb),
-            "repo_id": f'"{repo_id}"' if repo_id else f'"{repo_name}"',
+            "repo_id": f'"{repo_id or repo_name}"',
             "repo_name": f'"{repo_name}"',
             "host_id": f'"{host_id}"',
             "repo_host_name": f'"{host_name}"',
@@ -320,7 +349,6 @@ class SynoVmmClient:
             "vnics": json.dumps(vnics_data),
         }
 
-        # 6. Основная попытка через SYNO.Virtualization.Guest
         try:
             return await self.base.request(
                 "SYNO.Virtualization.Guest",
@@ -330,12 +358,13 @@ class SynoVmmClient:
                 http_method="POST",
             )
         except Exception:
+            disk_bytes = int(disk_size_gb * (BYTES_IN_KB**3))
             fallback_params: dict[str, Any] = {
                 "guest_name": clean_name,
                 "vcpu_num": vcpu_num,
                 "vram_size": vram_size_mb,
                 "storage_name": storage_name or repo_name,
-                "vdisks": [{"create_type": 0, "vdisk_size": disk_size_gb * 1024 * 1024 * 1024}],
+                "vdisks": [{"create_type": 0, "vdisk_size": disk_bytes}],
             }
             if iso_image_name:
                 fallback_params["iso_images"] = [iso_image_name, "unmounted"]
@@ -371,6 +400,6 @@ class SynoVmmClient:
                 "SYNO.Virtualization.API.Snapshot",
                 "create",
                 version=1,
-                params={"guest_name": guest_name, "description": description},
+                params={"guest_name": clean_name, "description": description},
                 http_method="POST",
             )

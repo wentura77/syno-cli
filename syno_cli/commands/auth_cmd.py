@@ -4,6 +4,7 @@ from pathlib import Path
 
 import typer
 
+from syno_cli.commands.common import console
 from syno_cli.config import USER_CACHE_DIR, USER_CONFIG_DIR, USER_CONFIG_FILE, settings
 from syno_cli.credential_storage import (
     clear_stored_credentials,
@@ -12,7 +13,6 @@ from syno_cli.credential_storage import (
     save_credentials_to_keyring,
 )
 from syno_cli.session_storage import get_session_storage
-from syno_cli.views.tables import console
 
 auth_app = typer.Typer(
     help="Безопасное шифрование и хранение учетных данных и сессии DSM (file / keyring)."
@@ -53,12 +53,13 @@ def auth_store(
         console.print(
             "[bold green]✓ Учетные данные успешно сохранены в системной связке ключей (keyring).[/bold green]"
         )
-    else:
-        cred_path = Path(settings.credentials_file)
-        save_credentials_to_file(username, password, cred_path)
-        console.print(
-            f"[bold green]✓ Учетные данные зашифрованы с привязкой к текущему ПК и сохранены в:[/bold green] {cred_path}"
-        )
+        return
+
+    cred_path = Path(settings.credentials_file)
+    save_credentials_to_file(username, password, cred_path)
+    console.print(
+        f"[bold green]✓ Учетные данные зашифрованы с привязкой к текущему ПК и сохранены в:[/bold green] {cred_path}"
+    )
 
 
 @auth_app.command("clear")

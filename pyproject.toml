@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "syno-cli"
-version = "0.1.0"
+version = "0.2.0"
 description = "Комплексная CLI-утилита для управления Synology NAS через официальный DSM Web API"
 authors = ["Vitalii Kovrigin <wentura77@gmail.com>"]
 readme = "README.md"
@@ -29,7 +29,7 @@ ruff = "^0.17.3"
 
 
 [tool.poetry.scripts]
-syno = "syno_cli.commands.main:run"
+syno_cli = "syno_cli.commands.main:run"
 
 [tool.darglint]
 docstring_style = "google"
@@ -51,7 +51,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 exclude = [".venv", "build", "dist", ".git", "__pycache__"]
 
 [tool.ruff.lint]
@@ -63,7 +63,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
