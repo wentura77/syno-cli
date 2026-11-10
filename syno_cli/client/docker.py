@@ -271,6 +271,26 @@ class SynoDockerClient:
             return []
         return [_format_log_entry(item) for item in reversed(logs)]
 
+
+    async def inspect_container(self, name: str) -> dict[str, Any]:
+        """Получает детальную конфигурацию контейнера (эквивалент docker inspect).
+
+        Args:
+            name: Имя целевого контейнера.
+
+        Returns:
+            dict[str, Any]: Словарь параметров конфигурации и состояния контейнера.
+        """
+        clean_name = name.lstrip("/")
+        data = await self.base.request(
+            "SYNO.Docker.Container",
+            "get",
+            version=1,
+            params={"name": f'"{clean_name}"'},
+            http_method="POST",
+        )
+        return dict(data) if isinstance(data, dict) else {}
+
     async def create_container(
         self,
         name: str,

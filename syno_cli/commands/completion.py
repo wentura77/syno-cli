@@ -66,3 +66,24 @@ def complete_remote_path(ctx: Any, args: Any, incomplete: str) -> list[str]:
         return asyncio.run(_fetch())
     except Exception:
         return []
+
+
+def complete_container_names(ctx: Any, args: Any, incomplete: str) -> list[str]:
+    """Динамически запрашивает имена Docker-контейнеров с Synology NAS для Tab-дополнения."""
+    _ = ctx, args
+    prefix_lower = incomplete.lower().lstrip("/")
+
+    async def _fetch() -> list[str]:
+        async with SynoDSM() as nas:
+            containers = await nas.docker.list_containers()
+            names: list[str] = []
+            for c in containers:
+                raw_name = str(c.get("name", "")).lstrip("/")
+                if raw_name and raw_name.lower().startswith(prefix_lower):
+                    names.append(raw_name)
+            return sorted(names)
+
+    try:
+        return asyncio.run(_fetch())
+    except Exception:
+        return []

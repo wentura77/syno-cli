@@ -516,3 +516,121 @@ def render_vmm_images(images: list[dict[str, Any]]) -> None:
         table.add_row(name, img_id, img_type, status, size)
 
     console.print(table)
+
+
+def render_docker_inspect(info: dict[str, Any]) -> None:
+    """Отрисовывает ключевые параметры инспекции Docker-контейнера в виде Rich-таблицы."""
+    if not info:
+        console.print("[yellow]Данные о контейнере отсутствуют.[/yellow]")
+        return
+
+    profile: dict[str, Any] = info.get("profile", {})
+    details: dict[str, Any] = info.get("details", {})
+    config: dict[str, Any] = details.get("Config", {})
+    state: dict[str, Any] = details.get("State", {})
+    net_settings: dict[str, Any] = details.get("NetworkSettings", {})
+
+    raw_name = profile.get("name") or details.get("Name") or info.get("name") or "—"
+    name = str(raw_name).lstrip("/")
+    image = str(profile.get("image") or config.get("Image") or info.get("image") or "—")
+
+    status_raw = str(state.get("Status") or details.get("status") or "unknown")
+    status_fmt = colorize_status(status_raw)
+    auto_start = "Да" if (profile.get("is_auto_start") or profile.get("enabled")) else "Нет"
+
+    cmd_raw = profile.get("cmd") or details.get("exe_cmd") or config.get("Cmd")
+    if isinstance(cmd_raw, list):
+        cmd = " ".join(cmd_raw)
+    else:
+        cmd = str(cmd_raw or "—")
+
+    mem_limit = profile.get("memory_limit") or details.get("HostConfig", {}).get("Memory") or 0
+    mem_str = format_bytes(int(mem_limit)) if mem_limit else "Без ограничений"
+    cpu_priority = str(profile.get("cpu_priority") or details.get("HostConfig", {}).get("CpuShares") or "По умолчанию")
+
+    networks: list[str] = []
+    ip_addresses: list[str] = []
+    mac_addresses: list[str] = []
+
+    nested_networks = net_settings.get("Networks", {})
+    if isinstance(nested_networks, dict):
+        for net_name, net_data in nested_networks.items():
+            if isinstance(net_data, dict):
+                networks.append(net_name)
+                ip = net_data.get("IPAddress")
+                mac = net_data.get("MacAddress")
+                if ip:
+                    ip_addresses.append(f"{ip} [{net_name}]")
+                if mac:
+                    mac_addresses.append(f"{mac} [{net_name}]")
+
+    if not ip_addresses and net_settings.get("IPAddress"):
+        ip_addresses.append(str(net_settings["IPAddress"]))
+    if not mac_addresses and net_settings.get("MacAddress"):
+        mac_addresses.append(str(net_settings["MacAddress"]))
+
+    networks_str = ", ".join(networks) if networks else str(profile.get("network_mode", "bridge"))
+    ip_str = ", ".join(ip_addresses) if ip_addresses else "— (host / без IP)"
+    mac_str = ", ".join(mac_addresses) if mac_addresses else "—"
+
+    ports: list[str] = []
+    for p_item in profile.get("port_bindings", []):
+        if isinstance(p_item, dict):
+            c_port = p_item.get("container_port")
+            h_port = p_item.get("host_port")
+            proto = p_item.get("type") or p_item.get("protocol") or "tcp"
+            ports.append(f"{h_port}:{c_port}/{proto}")
+    if not ports:
+        for c_port_proto, host_bindings in net_settings.get("Ports", {}).items():
+            if isinstance(host_bindings, list):
+                for b in host_bindings:
+                    h_port = b.get("HostPort")
+                    if h_port:
+                        ports.append(f"{h_port}:{c_port_proto}")
+    ports_str = ", ".join(ports) if ports else "—"
+
+    volumes: list[str] = []
+    for v in profile.get("volume_bindings", []):
+        if isinstance(v, dict):
+            volumes.append(f"{v.get('host_volume_file')} -> {v.get('mount_point')}")
+    if not volumes:
+        for m in details.get("Mounts", []):
+            if isinstance(m, dict):
+                volumes.append(f"{m.get('Source')} -> {m.get('Destination')}")
+    volumes_str = "\n".join(volumes) if volumes else "—"
+
+    envs: list[str] = []
+    for e in profile.get("env_variables", []):
+        if isinstance(e, dict):
+            envs.append(f"{e.get('key')}={e.get('value')}")
+    if not envs:
+        for raw_env in config.get("Env", []):
+            envs.append(str(raw_env))
+    envs_str = "\n".join(envs[:10]) + ("\n..." if len(envs) > 10 else "") if envs else "—"
+
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_column("Параметр", style="bold cyan", width=22)
+    table.add_column("Значение", style="white")
+
+    table.add_row("Имя контейнера:", f"[bold white]{name}[/bold white]")
+    table.add_row("Статус:", status_fmt)
+    table.add_row("Образ (Image):", image)
+    table.add_row("Команда (CMD):", cmd)
+    table.add_row("Автозапуск:", auto_start)
+    table.add_row("Лимит памяти RAM:", mem_str)
+    table.add_row("Приоритет CPU:", cpu_priority)
+    table.add_row("Сеть (Network):", networks_str)
+    table.add_row("IP-адрес:", f"[bold green]{ip_str}[/bold green]" if "—" not in ip_str else ip_str)
+    table.add_row("MAC-адрес:", f"[dim]{mac_str}[/dim]")
+    table.add_row("Проброс портов:", ports_str)
+    table.add_row("Монтирование томов:", volumes_str)
+    table.add_row("Переменные ENV:", envs_str)
+
+    console.print(
+        Panel(
+            table,
+            title=f"[bold blue]Параметры контейнера: {name}[/bold blue]",
+            expand=False,
+            border_style="cyan",
+        )
+    )

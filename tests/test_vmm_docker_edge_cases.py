@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from syno_cli.client.base import BaseSynoClient
 from syno_cli.client.docker import (
+    SynoDockerClient,
     _parse_env_variables,
     _parse_port_bindings,
     _parse_volume_bindings,
@@ -270,3 +271,49 @@ def test_compose_up_missing_file_raises_error(tmp_path: Path) -> None:
 
     assert result.exit_code != 0
     assert "Файл compose не найден" in result.stderr or "FileNotFoundError" in result.stderr
+
+
+@pytest.mark.asyncio
+async def test_docker_inspect_container(tmp_path: Path) -> None:
+    """Проверяет отправку запроса get для инспекции контейнера."""
+    captured_name = ""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal captured_name
+        if request.method == "POST":
+            params = {k: v[0] for k, v in parse_qs(request.content.decode("utf-8")).items()}
+        else:
+            params = dict(request.url.params)
+
+        api = params.get("api", "")
+        method = params.get("method", "")
+
+        if api == "SYNO.API.Auth":
+            return httpx.Response(200, json={"success": True, "data": {"sid": "test_sid"}})
+
+        if api == "SYNO.Docker.Container" and method == "get":
+            captured_name = params.get("name", "")
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "data": {
+                        "name": "redis-app",
+                        "image": "redis:alpine",
+                        "memory_limit": 536870912,
+                    },
+                },
+            )
+        return httpx.Response(404)
+
+    cfg = SynoSettings(host="mock-nas", session_file=tmp_path / ".session.json")
+    base = BaseSynoClient(config=cfg, transport=httpx.MockTransport(handler))
+    docker_client = SynoDockerClient(base)
+
+    try:
+        data = await docker_client.inspect_container("redis-app")
+        assert captured_name == '"redis-app"'
+        assert data.get("image") == "redis:alpine"
+        assert data.get("memory_limit") == 536870912
+    finally:
+        await base.close()

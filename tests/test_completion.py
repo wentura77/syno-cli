@@ -7,6 +7,7 @@ import pytest
 from syno_cli.commands.completion import (
     _build_suggestion_path,
     _split_incomplete_path,
+    complete_container_names,
     complete_remote_path,
 )
 
@@ -126,4 +127,41 @@ def test_complete_remote_path_network_or_api_error_returns_empty_list() -> None:
             ctx=None, args=[], incomplete="/volume1/test"
         )
 
+        assert suggestions == []
+
+
+# ---------------------------------------------------------------------------
+# 3. Интеграционные тесты complete_container_names
+# ---------------------------------------------------------------------------
+
+
+def test_complete_container_names_success() -> None:
+    """Проверяет фильтрацию и сортировку имен контейнеров для shell Tab-дополнения."""
+    mock_containers = [
+        {"name": "/ubuntu-squid-1", "status": "running"},
+        {"name": "ubuntu-db", "status": "stopped"},
+        {"name": "nginx-web", "status": "running"},
+        {"name": "/redis-cache", "status": "running"},
+    ]
+
+    with patch("syno_cli.commands.completion.SynoDSM") as mock_dsm:
+        instance = mock_dsm.return_value.__aenter__.return_value
+        instance.docker.list_containers = AsyncMock(return_value=mock_containers)
+
+        # Поиск по префиксу 'ub'
+        suggestions = complete_container_names(ctx=None, args=[], incomplete="ub")
+        assert suggestions == ["ubuntu-db", "ubuntu-squid-1"]
+
+        # Поиск по префиксу 'N' (регистронезависимо)
+        suggestions_nginx = complete_container_names(ctx=None, args=[], incomplete="N")
+        assert suggestions_nginx == ["nginx-web"]
+
+
+def test_complete_container_names_error_fallback() -> None:
+    """Проверяет возврат пустого списка при сбое API без падения шелла."""
+    with patch("syno_cli.commands.completion.SynoDSM") as mock_dsm:
+        instance = mock_dsm.return_value.__aenter__.return_value
+        instance.docker.list_containers = AsyncMock(side_effect=OSError("NAS connection error"))
+
+        suggestions = complete_container_names(ctx=None, args=[], incomplete="ub")
         assert suggestions == []
