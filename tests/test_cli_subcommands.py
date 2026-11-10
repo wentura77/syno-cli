@@ -310,3 +310,41 @@ def test_cli_storage_disks() -> None:
         assert result.exit_code == ExitCode.SUCCESS
         data = json.loads(result.stdout)
         assert data["disks"][0]["temp"] == 35
+
+
+def test_cli_docker_inspect_json() -> None:
+    """Проверяет команду 'syno docker inspect <name> --json' на валидность JSON и код выхода 0."""
+    mock_inspect_data = {
+        "profile": {
+            "name": "my-container",
+            "image": "redis:alpine",
+            "memory_limit": 134217728,
+            "port_bindings": [{"container_port": 6379, "host_port": 6379, "type": "tcp"}],
+        },
+        "details": {
+            "Name": "/my-container",
+            "State": {"Status": "running"},
+            "NetworkSettings": {
+                "Networks": {
+                    "bridge": {
+                        "IPAddress": "172.17.0.3",
+                        "MacAddress": "02:42:ac:11:00:03",
+                    }
+                }
+            },
+        },
+    }
+
+    with patch("syno_cli.commands.docker_cmd.SynoDSM") as mock_dsm:
+        instance = mock_dsm.return_value.__aenter__.return_value
+        instance.docker.inspect_container = AsyncMock(return_value=mock_inspect_data)
+
+        result = runner.invoke(app, ["docker", "inspect", "my-container", "--json"])
+
+        assert result.exit_code == ExitCode.SUCCESS
+        instance.docker.inspect_container.assert_awaited_once_with("my-container")
+
+        payload = json.loads(result.stdout)
+        assert payload["profile"]["name"] == "my-container"
+        assert payload["details"]["State"]["Status"] == "running"
+        assert payload["details"]["NetworkSettings"]["Networks"]["bridge"]["IPAddress"] == "172.17.0.3"

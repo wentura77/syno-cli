@@ -317,3 +317,84 @@ async def test_docker_inspect_container(tmp_path: Path) -> None:
         assert data.get("memory_limit") == 536870912
     finally:
         await base.close()
+
+
+@pytest.mark.asyncio
+async def test_docker_create_container_full_payload(tmp_path: Path) -> None:
+    """Проверяет создание контейнера с портами, томами, ENV-переменными и автозапуском."""
+    captured_payload: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal captured_payload
+        params = dict(request.url.params)
+        if request.method == "POST" and request.content:
+            post_data = {k: v[0] for k, v in parse_qs(request.content.decode("utf-8")).items()}
+            params.update(post_data)
+
+        api = params.get("api", "")
+        method = params.get("method", "")
+
+        if api == "SYNO.API.Auth" and method == "login":
+            return httpx.Response(200, json={"success": True, "data": {"sid": "test_docker_sid"}})
+
+        if api == "SYNO.Docker.Container" and method == "create":
+            captured_payload = params
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "data": {"name": "app-worker", "status": "created"},
+                },
+            )
+
+        return httpx.Response(404)
+
+    cfg = SynoSettings(host="mock-nas", session_file=tmp_path / ".session.json")
+    base = BaseSynoClient(config=cfg, transport=httpx.MockTransport(handler))
+    docker = SynoDockerClient(base)
+
+    try:
+        result = await docker.create_container(
+            name="app-worker",
+            image="python:3.12-slim",
+            ports=["8080:80", "9000:9000"],
+            volumes=["/volume1/docker/app:/app", "/volume1/logs:/var/log/app"],
+            env_vars=["APP_ENV=production", "DEBUG=false", "SECRET_KEY=syno-secret"],
+            auto_start=True,
+        )
+
+        assert result.get("name") == "app-worker"
+        assert result.get("status") == "created"
+
+        assert captured_payload.get("api") == "SYNO.Docker.Container"
+        assert captured_payload.get("method") == "create"
+        assert captured_payload.get("name") == "app-worker"
+        assert captured_payload.get("image") == "python:3.12-slim"
+        assert captured_payload.get("is_auto_start") in ("True", "true", True)
+
+        raw_ports = captured_payload.get("port_bindings", "[]")
+        ports_data: Any = json.loads(str(raw_ports)) if isinstance(raw_ports, str) else raw_ports
+        assert isinstance(ports_data, list)
+        assert len(ports_data) == 2
+        assert ports_data[0] == {"host_port": 8080, "container_port": 80, "protocol": "tcp"}
+        assert ports_data[1] == {"host_port": 9000, "container_port": 9000, "protocol": "tcp"}
+
+        raw_vols = captured_payload.get("volume_bindings", "[]")
+        vols_data: Any = json.loads(str(raw_vols)) if isinstance(raw_vols, str) else raw_vols
+        assert isinstance(vols_data, list)
+        assert len(vols_data) == 2
+        assert vols_data[0] == {
+            "host_volume_file": "/volume1/docker/app",
+            "mount_point": "/app",
+            "type": "bind",
+        }
+
+        raw_envs = captured_payload.get("env_variables", "[]")
+        envs_data: Any = json.loads(str(raw_envs)) if isinstance(raw_envs, str) else raw_envs
+        assert isinstance(envs_data, list)
+        assert len(envs_data) == 3
+        assert {"key": "APP_ENV", "value": "production"} in envs_data
+        assert {"key": "DEBUG", "value": "false"} in envs_data
+        assert {"key": "SECRET_KEY", "value": "syno-secret"} in envs_data
+    finally:
+        await base.close()

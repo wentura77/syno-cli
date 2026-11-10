@@ -20,6 +20,7 @@ from syno_cli.views.tables import (
     format_timestamp,
     render_docker_containers,
     render_docker_images,
+    render_docker_inspect,
     render_docker_logs,
     render_docker_projects,
     render_docker_stats,
@@ -315,3 +316,113 @@ def test_render_downloads_and_logs_and_vmm() -> None:
     )
     assert "debian12" in out_vmm_imgs
     assert "ISO" in out_vmm_imgs
+
+
+def test_render_docker_inspect_empty() -> None:
+    """Проверяет обработку пустого словаря при инспекции контейнера."""
+    out_empty = _capture_render(render_docker_inspect, {})
+    assert "отсутствуют" in out_empty
+
+
+def test_render_docker_inspect_nested_dsm_structure() -> None:
+    """Проверяет парсинг реальной двухуровневой структуры DSM 7.2 (profile + details)."""
+    raw_inspect = {
+        "profile": {
+            "name": "ubuntu-squid-2",
+            "image": "ubuntu/squid:6.13-25.04_edge",
+            "cmd": "-f /etc/squid/squid.conf -NYC",
+            "cpu_priority": 10,
+            "memory_limit": 134217728,
+            "enabled": True,
+            "network_mode": "bridge",
+            "port_bindings": [
+                {"container_port": 3128, "host_port": 3128, "type": "tcp"}
+            ],
+            "volume_bindings": [
+                {
+                    "host_volume_file": "/Backup/Squid/home.conf",
+                    "mount_point": "/etc/squid/conf.d/home.conf",
+                }
+            ],
+            "env_variables": [
+                {"key": "TZ", "value": "UTC"},
+                {"key": "APP_ENV", "value": "prod"},
+            ],
+        },
+        "details": {
+            "Name": "/ubuntu-squid-2",
+            "State": {
+                "Status": "running",
+                "Running": True,
+            },
+            "NetworkSettings": {
+                "Networks": {
+                    "bridge": {
+                        "IPAddress": "172.17.0.2",
+                        "MacAddress": "02:42:ac:11:00:02",
+                    }
+                }
+            },
+            "Mounts": [],
+            "Config": {},
+        },
+    }
+
+    out = _capture_render(render_docker_inspect, raw_inspect)
+
+    assert "ubuntu-squid-2" in out
+    assert "ubuntu/squid:6.13-25.04_edge" in out
+    assert "-f /etc/squid/squid.conf -NYC" in out
+    assert "128.00 MB" in out
+    assert "running" in out
+    assert "172.17.0.2" in out
+    assert "02:42:ac:11:00:02" in out
+    assert "3128:3128/tcp" in out
+    assert "/Backup/Squid/home.conf -> /etc/squid/conf.d/home.conf" in out
+    assert "TZ=UTC" in out
+    assert "APP_ENV=prod" in out
+
+
+def test_render_docker_inspect_fallback_details_only() -> None:
+    """Проверяет фолбэк-парсинг при отсутствии блока profile (чистый Docker Engine)."""
+    raw_details_only = {
+        "details": {
+            "Name": "/standalone-redis",
+            "State": {"Status": "stopped"},
+            "Config": {
+                "Image": "redis:alpine",
+                "Cmd": ["redis-server", "--appendonly", "yes"],
+                "Env": ["REDIS_PORT=6379"],
+            },
+            "HostConfig": {
+                "Memory": 0,
+                "CpuShares": 50,
+            },
+            "NetworkSettings": {
+                "IPAddress": "192.168.100.5",
+                "MacAddress": "02:11:22:33:44:55",
+                "Ports": {
+                    "6379/tcp": [{"HostIp": "0.0.0.0", "HostPort": "6379"}]
+                },
+            },
+            "Mounts": [
+                {
+                    "Source": "/volume1/docker/redis/data",
+                    "Destination": "/data",
+                }
+            ],
+        }
+    }
+
+    out = _capture_render(render_docker_inspect, raw_details_only)
+
+    assert "standalone-redis" in out
+    assert "redis:alpine" in out
+    assert "stopped" in out
+    assert "redis-server --appendonly yes" in out
+    assert "Без ограничений" in out
+    assert "192.168.100.5" in out
+    assert "02:11:22:33:44:55" in out
+    assert "6379:6379/tcp" in out
+    assert "/volume1/docker/redis/data -> /data" in out
+    assert "REDIS_PORT=6379" in out
