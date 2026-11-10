@@ -417,7 +417,7 @@ def render_docker_logs(logs: list[str]) -> None:
         console.print("[dim]Логи контейнера пусты.[/dim]")
         return
     for line in logs:
-        console.print(line)
+        console.print(line, markup=False)
 
 
 def render_docker_projects(projects: list[dict[str, Any]]) -> None:
