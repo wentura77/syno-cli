@@ -37,6 +37,22 @@ class SynoDownloadStationClient:
         """
         self.base = base
 
+    async def _ensure_ready(self) -> None:
+        """Гарантирует наличие сессии и обнаружение API перед вызовом."""
+        if not self.base.api_map:
+            try:
+                await self.base.discover_apis()
+            except Exception:
+                pass
+        if not self.base.sid:
+            await self.base.login()
+
+    def _normalize_task_ids(self, task_id: str | list[str]) -> str:
+        """Приводит одиночный ID или список к строке формата DSM 'id1,id2'."""
+        if isinstance(task_id, (list, tuple, set)):
+            return ",".join(str(i).strip() for i in task_id if str(i).strip())
+        return str(task_id).strip()
+
     async def list_tasks(self) -> list[dict[str, Any]]:
         """Получает список всех задач загрузки с детальной информацией о прогрессе.
 
@@ -189,24 +205,24 @@ class SynoDownloadStationClient:
             files={"file": (file_path.name, file_bytes, "application/x-bittorrent")},
         )
 
-    async def pause_task(self, task_id: str) -> dict[str, Any]:
-        """Приостанавливает выполнение задачи скачивания.
-
-        Args:
-            task_id: Идентификатор задачи.
-
-        Returns:
-            dict[str, Any]: Ответ сервера.
-        """
+    async def pause_task(self, task_id: str | list[str]) -> Any:
+        """Приостанавливает выполнение одной или нескольких задач скачивания."""
+        await self._ensure_ready()
+        ids_str = self._normalize_task_ids(task_id)
+        api_name = (
+            "SYNO.DownloadStation2.Task"
+            if self.base.api_map and "SYNO.DownloadStation2.Task" in self.base.api_map
+            else "SYNO.DownloadStation.Task"
+        )
         return await self.base.request(
-            "SYNO.DownloadStation.Task",
+            api_name,
             "pause",
             version=1,
-            params={"id": task_id},
+            params={"id": ids_str},
             http_method="POST",
         )
 
-    async def resume_task(self, task_id: str) -> dict[str, Any]:
+    async def resume_task(self, task_id: str | list[str]) -> Any:
         """Возобновляет приостановленную задачу скачивания.
 
         Args:
@@ -215,15 +231,24 @@ class SynoDownloadStationClient:
         Returns:
             dict[str, Any]: Ответ сервера.
         """
+        await self._ensure_ready()
+        ids_str = self._normalize_task_ids(task_id)
+        api_name = (
+            "SYNO.DownloadStation2.Task"
+            if "SYNO.DownloadStation2.Task" in self.base.api_map
+            else "SYNO.DownloadStation.Task"
+        )
         return await self.base.request(
-            "SYNO.DownloadStation.Task",
+            api_name,
             "resume",
             version=1,
-            params={"id": task_id},
+            params={"id": ids_str},
             http_method="POST",
         )
 
-    async def delete_task(self, task_id: str, force_complete: bool = False) -> dict[str, Any]:
+    async def delete_task(
+        self, task_id: str | list[str], force_complete: bool = False
+    ) -> Any:
         """Удаляет задачу из списка Download Station.
 
         Args:
@@ -233,10 +258,17 @@ class SynoDownloadStationClient:
         Returns:
             dict[str, Any]: Ответ сервера.
         """
+        await self._ensure_ready()
+        ids_str = self._normalize_task_ids(task_id)
+        api_name = (
+            "SYNO.DownloadStation2.Task"
+            if "SYNO.DownloadStation2.Task" in self.base.api_map
+            else "SYNO.DownloadStation.Task"
+        )
         return await self.base.request(
-            "SYNO.DownloadStation.Task",
+            api_name,
             "delete",
             version=1,
-            params={"id": task_id, "force_complete": force_complete},
+            params={"id": ids_str, "force_complete": force_complete},
             http_method="POST",
         )

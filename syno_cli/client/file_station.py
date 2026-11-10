@@ -299,3 +299,52 @@ class SynoFileStationClient:
             params=params,
             http_method="POST",
         )
+
+    async def get_copy_move_status(self, taskid: str) -> dict[str, Any]:
+        """Запрашивает статус выполнения асинхронной задачи копирования или перемещения.
+
+        Args:
+            taskid: Идентификатор задачи, полученный при вызове `copy_or_move`.
+
+        Returns:
+            dict[str, Any]: Словарь с состоянием задачи (finished, progress, processed_size и др.).
+        """
+        return await self.base.request(
+            "SYNO.FileStation.CopyMove",
+            "status",
+            version=3,
+            params={"taskid": f'"{taskid}"'},
+            http_method="GET",
+        )
+
+    async def wait_copy_move(
+        self,
+        taskid: str,
+        poll_interval: float = 0.5,
+        timeout: float = 60.0,
+    ) -> dict[str, Any]:
+        """Ожидает завершения асинхронной задачи копирования или перемещения.
+
+        Args:
+            taskid: Идентификатор задачи.
+            poll_interval: Интервал опроса статуса в секундах.
+            timeout: Максимальное время ожидания завершения задачи в секундах.
+
+        Returns:
+            dict[str, Any]: Финальное состояние задачи.
+
+        Raises:
+            TimeoutError: Если операция не завершилась за отведенное время.
+            DsmApiError: Если статус задачи сообщает об ошибке выполнения.
+        """
+        import asyncio
+        import time
+
+        start_time = time.monotonic()
+        while True:
+            status = await self.get_copy_move_status(taskid)
+            if status.get("finished", False):
+                return status
+            if time.monotonic() - start_time > timeout:
+                raise TimeoutError(f"Превышен таймаут ожидания задачи CopyMove {taskid}")
+            await asyncio.sleep(poll_interval)
